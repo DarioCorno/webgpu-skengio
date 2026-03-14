@@ -1,0 +1,14 @@
+{
+  "name": "skengio",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm -w @skengio/editor run dev",
+    "build": "npm -w @skengio/engine run build && npm -w @skengio/editor run build",
+    "build:engine": "npm -w @skengio/engine run build",
+    "serve": "npm -w @skengio/editor run serve"
+  }
+}

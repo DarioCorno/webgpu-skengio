@@ -1,0 +1,69 @@
+{
+    "envConfig": { 
+        "background": { 
+            "type": "cubemap", 
+            "basePath": "/textures/cubemaps/saintpeter/", 
+            "ext": ".jpg" 
+        } 
+    },       
+  "engineConfig": {
+    "depthPrepass": true,
+    "shadowAtlasSize": 2048,
+    "defaultShadowMapResolution": 512,
+    "maxAnisotropy": 4,
+    "frustumCulling": true,
+    "showEditorPanel": true,
+    "showStats": true
+  },
+  "camera": {
+    "position": [0, 0, 3],
+    "rotation": [0, 0, 0, 1],
+    "projection": "perspective",
+    "fovY": 50,
+    "near": 0.1,
+    "far": 100,
+    "exposure": 1.5,
+    "taaEnabled": false,
+    "controllers": [
+      {
+        "type": "orbit",
+        "moveSpeed": 3,
+        "orbitSensitivity": 0.005,
+        "zoomSensitivity": 0.001,
+        "distance": 10,
+        "minDistance": 3,
+        "maxDistance": 20,
+        "active": true
+      }
+    ]
+  },
+  "nodes": [
+    {
+      "name": "DamagedHelmet",
+      "mesh": { "type": "gltf", "url": "/models/DamagedHelmet.glb" }
+    },
+    {
+      "name": "Sun",
+      "rotation": [-0.354, -0.354, -0.146, 0.854],
+      "light": {
+        "type": "directional",
+        "castShadow": true,
+        "shadowType": "cascaded",
+        "numCascades": 3,
+        "shadowBias": 1.5,
+        "shadowMapResolution": 1024,
+        "color": [1, 0.95, 0.85],
+        "intensity": 3
+      }
+    },
+    {
+      "name": "FillLight",
+      "rotation": [0.25, 0.6, 0.1, 0.75],
+      "light": {
+        "type": "directional",
+        "color": [0.4, 0.5, 0.7],
+        "intensity": 0.8
+      }
+    }
+  ]
+}

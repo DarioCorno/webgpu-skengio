@@ -1,0 +1,1 @@
+set RENDERDOC_HOOK_EGL=0 && "C:\Program Files\Google\Chrome\Application\chrome.exe" --no-sandob --disable-gpu-sandbox --disable-direct-composition -gpu-startup-dialog -enable-dawn-features=enable_renderdoc_process_injection http://localhost:5173

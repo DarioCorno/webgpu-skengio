@@ -1,0 +1,30 @@
+{
+  "name": "@skengio/engine",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/skengio-engine.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/skengio-engine.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": ["dist"],
+  "peerDependencies": {
+    "gl-matrix": "^3.4.0",
+    "@gltf-transform/core": "^4.0.0"
+  },
+  "devDependencies": {
+    "@webgpu/types": "0.1.69",
+    "gl-matrix": "^3.4.4",
+    "@gltf-transform/core": "^4.3.0",
+    "typescript": "~5.9.3",
+    "vite": "^7.3.1",
+    "vite-plugin-dts": "^4.5.0"
+  },
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch"
+  }
+}

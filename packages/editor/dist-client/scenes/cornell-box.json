@@ -1,0 +1,211 @@
+{
+  "engineConfig": {
+    "depthPrepass": true,
+    "shadowAtlasSize": 2048,
+    "defaultShadowMapResolution": 512,
+    "maxAnisotropy": 4,
+    "frustumCulling": true,
+    "showEditorPanel": false,
+    "showStats": true
+  },
+
+  "envConfig" : {
+    "background": {
+      "type": "color",
+      "color": [0.0, 0.0, 0.0]
+    },
+    "ambient": [0.13, 0.13, 0.13],
+    "ssao": {
+      "enabled": true,
+      "radius": 0.6,
+      "intensity": 1.5,
+      "sampleCount": 16
+    }
+  },
+
+  "camera": {
+    "position": [0, 2.5, 6.5],
+    "rotation": [0, 0, 0, 1],
+    "projection": "perspective",
+    "fovY": 50,
+    "near": 0.1,
+    "far": 100,
+    "exposure": 0.2,
+    "taaEnabled": false,
+    "controllers": [
+      {
+        "type": "freelook",
+        "moveSpeed": 3,
+        "lookSensitivity": 0.002,
+        "sprintMultiplier": 2.5,
+        "active": true
+      }
+    ]
+  },
+
+  "textures": {},
+
+  "materials": {
+    "FloorMat": {
+      "baseColorFactor": [0.85, 0.85, 0.85, 1.0],
+      "metallicFactor":  0.0,
+      "roughnessFactor": 0.8,
+      "emissiveFactor":  [0, 0, 0],
+      "normalScale":     1.0,
+      "occlusionStrength": 1.0,
+      "alphaCutoff":     0.5
+    },
+    "CeilingMat": {
+      "baseColorFactor": [0.85, 0.85, 0.85, 1.0],
+      "metallicFactor":  0.0,
+      "roughnessFactor": 0.7,
+      "emissiveFactor":  [0, 0, 0],
+      "normalScale":     1.0,
+      "occlusionStrength": 1.0,
+      "alphaCutoff":     0.5
+    },
+    "BackWallMat": {
+      "baseColorFactor": [0.85, 0.85, 0.85, 1.0],
+      "metallicFactor":  0.0,
+      "roughnessFactor": 0.7,
+      "emissiveFactor":  [0, 0, 0],
+      "normalScale":     1.0,
+      "occlusionStrength": 1.0,
+      "alphaCutoff":     0.5
+    },
+    "LeftWallMat": {
+      "baseColorFactor": [0.85, 0.35, 0.35, 1.0],
+      "metallicFactor":  0.0,
+      "roughnessFactor": 0.7,
+      "emissiveFactor":  [0, 0, 0],
+      "normalScale":     1.0,
+      "occlusionStrength": 1.0,
+      "alphaCutoff":     0.5
+    },
+    "RightWallMat": {
+      "baseColorFactor": [0.35, 0.65, 0.35, 1.0],
+      "metallicFactor":  0.0,
+      "roughnessFactor": 0.7,
+      "emissiveFactor":  [0, 0, 0],
+      "normalScale":     1.0,
+      "occlusionStrength": 1.0,
+      "alphaCutoff":     0.5
+    },
+    "CubeMat": {
+      "baseColorFactor": [0.75, 0.82, 0.92, 1.0],
+      "metallicFactor":  0.1,
+      "roughnessFactor": 0.55,
+      "emissiveFactor":  [0, 0, 0],
+      "normalScale":     1.0,
+      "occlusionStrength": 1.0,
+      "alphaCutoff":     0.5
+    },
+    "SphereMat": {
+      "baseColorFactor": [0.92, 0.78, 0.75, 1.0],
+      "metallicFactor":  0.15,
+      "roughnessFactor": 0.5,
+      "emissiveFactor":  [0, 0, 0],
+      "normalScale":     1.0,
+      "occlusionStrength": 1.0,
+      "alphaCutoff":     0.5
+    },
+    "SmallSphereMat": {
+      "baseColorFactor": [0.82, 0.75, 0.92, 1.0],
+      "metallicFactor":  0.1,
+      "roughnessFactor": 0.45,
+      "emissiveFactor":  [0, 0, 0],
+      "normalScale":     1.0,
+      "occlusionStrength": 1.0,
+      "alphaCutoff":     0.5
+    }
+  },
+
+  "nodes": [
+    {
+      "_comment": "─── Ceiling light ────────────────────────────────────────────",
+      "name": "CeilingLight",
+      "position": [0, 4.8, 0],
+      "light": {
+        "type":      "point",
+        "castShadow": false,
+        "shadowMapResolution": 512,
+        "shadowBias": 0.005,
+        "color":     [1.0, 0.95, 0.85],
+        "intensity": 35.0,
+        "range":     10.0
+      }
+    },
+
+    {
+      "_comment": "─── Cornell box walls ─────────────────────────────────────────",
+      "name": "Floor",
+      "position": [0, 0, 0],
+      "rotation": [0, 0, 0, 1],
+      "scale":    [1, 1, 1],
+      "mesh":     { "type": "plane", "width": 5, "depth": 5 },
+      "material": "FloorMat"
+    },
+    {
+      "name": "Ceiling",
+      "position": [0, 5, 0],
+      "rotation": [1, 0, 0, 0],
+      "scale":    [1, 1, 1],
+      "mesh":     { "type": "plane", "width": 5, "depth": 5 },
+      "material": "CeilingMat"
+    },
+    {
+      "_comment": "Back wall: plane rotated +90 deg around X. quat = [sin(pi/4),0,0,cos(pi/4)]",
+      "name": "BackWall",
+      "position": [0, 2.5, -2.5],
+      "rotation": [0.7071, 0, 0, 0.7071],
+      "scale":    [1, 1, 1],
+      "mesh":     { "type": "plane", "width": 5, "depth": 5 },
+      "material": "BackWallMat"
+    },
+    {
+      "_comment": "Left wall: plane rotated -90 deg around Z so normal faces +X (inward). quat = [0,0,-sin(pi/4),cos(pi/4)]",
+      "name": "LeftWall",
+      "position": [-2.5, 2.5, 0],
+      "rotation": [0, 0, -0.7071, 0.7071],
+      "scale":    [1, 1, 1],
+      "mesh":     { "type": "plane", "width": 5, "depth": 5 },
+      "material": "LeftWallMat"
+    },
+    {
+      "_comment": "Right wall: plane rotated +90 deg around Z so normal faces -X (inward). quat = [0,0,sin(pi/4),cos(pi/4)]",
+      "name": "RightWall",
+      "position": [2.5, 2.5, 0],
+      "rotation": [0, 0, 0.7071, 0.7071],
+      "scale":    [1, 1, 1],
+      "mesh":     { "type": "plane", "width": 5, "depth": 5 },
+      "material": "RightWallMat"
+    },
+
+    {
+      "_comment": "─── Objects ───────────────────────────────────────────────────",
+      "name": "Cube",
+      "position": [-0.8, 0.75, -0.4],
+      "rotation": [0, 0.2588, 0, 0.9659],
+      "scale":    [1, 1, 1],
+      "mesh":     { "type": "box", "width": 1.2, "height": 1.5, "depth": 1.2 },
+      "material": "CubeMat"
+    },
+    {
+      "name": "Sphere",
+      "position": [1.0, 0.65, 0.3],
+      "rotation": [0, 0, 0, 1],
+      "scale":    [1, 1, 1],
+      "mesh":     { "type": "uvsphere", "radius": 0.65 },
+      "material": "SphereMat"
+    },
+    {
+      "_comment": "Small sphere sitting on top of the cube. Cube top = 1.5, sphere radius = 0.35, so center Y = 1.85",
+      "name": "SmallSphere",
+      "position": [-0.8, 1.85, -0.4],
+      "rotation": [0, 0, 0, 1],
+      "scale":    [1, 1, 1],
+      "mesh":     { "type": "icosphere", "radius": 0.35 },
+      "material": "SmallSphereMat"
+    }
+  ]
+}

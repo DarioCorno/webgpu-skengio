@@ -1,0 +1,184 @@
+{
+  "_comment": "demo.json — full scene exercising every engine feature: camera, controllers, textures, PBR materials, procedural meshes, directional / point / spot lights.",
+
+  "engineConfig": {
+    "depthPrepass": true,
+    "shadowAtlasSize": 2048,
+    "defaultShadowMapResolution": 512,
+    "maxAnisotropy": 4,
+    "frustumCulling": true,
+    "showEditorPanel": true,
+    "showStats": true
+  },
+
+  "camera": {
+    "position": [0, 1.5, 5],
+    "rotation": [0, 0, 0, 1],
+    "projection": "perspective",
+    "fovY": 60,
+    "near": 0.1,
+    "far": 200,
+    "exposure": 0,
+    "taaEnabled": false,
+    "controllers": [
+      {
+        "type": "freelook",
+        "moveSpeed": 5,
+        "lookSensitivity": 0.002,
+        "sprintMultiplier": 3,
+        "active": true
+      }
+    ]
+  },
+
+  "textures": {
+    "brick_diffuse":  "/textures/brick-wall-diffuse.jpg",
+    "rust_diffuse":   "/textures/rust-ground-diffuse.jpg",
+    "rust_normal":    "/textures/rust-ground-normal.jpg",
+    "rust_roughness": "/textures/rust-ground-roguhness.jpg"
+  },
+
+  "materials": {
+    "CubeMat": {
+      "baseColorFactor": [0.9, 0.7, 0.4, 1.0],
+      "metallicFactor":  0.0,
+      "roughnessFactor": 0.45,
+      "emissiveFactor":  [0, 0, 0],
+      "normalScale":     1.0,
+      "occlusionStrength": 1.0,
+      "alphaCutoff":     0.5
+    },
+    "UVSphereMat": {
+      "baseColorFactor": [0.3, 0.6, 0.9, 1.0],
+      "metallicFactor":  0.1,
+      "roughnessFactor": 0.6,
+      "emissiveFactor":  [0, 0, 0],
+      "normalScale":     1.0,
+      "occlusionStrength": 1.0,
+      "alphaCutoff":     0.5
+    },
+    "IcoSphereMat": {
+      "baseColorFactor": [0.8, 0.3, 0.3, 1.0],
+      "metallicFactor":  0.6,
+      "roughnessFactor": 0.2,
+      "emissiveFactor":  [0, 0, 0],
+      "normalScale":     1.0,
+      "occlusionStrength": 1.0,
+      "alphaCutoff":     0.5
+    },
+    "FloorMat": {
+      "baseColorFactor":    [1.0, 1.0, 1.0, 1.0],
+      "metallicFactor":     0.0,
+      "roughnessFactor":    1.0,
+      "normalScale":        1.0,
+      "emissiveFactor":     [0, 0, 0],
+      "occlusionStrength":  1.0,
+      "alphaCutoff":        0.5,
+      "baseColorMap":       "rust_diffuse",
+      "normalMap":          "rust_normal",
+      "metallicRoughnessMap": "rust_roughness"
+    },
+    "WallMat": {
+      "baseColorFactor":  [1.0, 1.0, 1.0, 1.0],
+      "metallicFactor":   0.0,
+      "roughnessFactor":  0.9,
+      "emissiveFactor":   [0, 0, 0],
+      "normalScale":      1.0,
+      "occlusionStrength": 1.0,
+      "alphaCutoff":      0.5,
+      "baseColorMap":     "brick_diffuse"
+    }
+  },
+
+  "nodes": [
+
+    {
+      "name": "AmberLight",
+      "position": [0, 3.0, 0.5],
+      "light": {
+        "type":      "point",
+        "castShadow" : true,
+        "shadowMapResolution": 512,
+        "color":     [1.0, 0.55, 0.15],
+        "intensity": 20.0,
+        "range":     6.0
+      }
+    },
+
+    {
+      "_comment": "Blue spotlight aimed from (-3.5,1.5,-1) toward scene centre (0,0.5,0). Rotation: quaternion [-0.2184,-0.7647,0, 0.6063] rotates local -Z to the target direction.",
+      "name": "BlueSpotLight",
+      "position": [-3.5, 1.5, -1.0],
+      "rotation": [-0.2184, -0.7647, 0.0, 0.6063],
+      "light": {
+        "type": "spot",
+        "color":          [0.25, 0.45, 1.0],
+        "intensity":      40.0,
+        "range":          8.0,
+        "innerConeAngle": 15,
+        "outerConeAngle": 30
+      }
+    },
+
+    {
+      "name": "CrimsonLight",
+      "position": [3.0, 1.2, -3.5],
+      "light": {
+        "type":               "point",
+        "castShadow":         false,
+        "shadowBias":         0.002,
+        "shadowMapResolution": 512,
+        "color":              [1.0, 0.15, 0.2],
+        "intensity":          18.0,
+        "range":              3.5
+      }
+    },
+
+    {
+      "_comment": "─── Meshes ───────────────────────────────────────────────────────────────",
+      "name": "Cube",
+      "position": [0, 0.5, 0],
+      "rotation": [0, 0, 0, 1],
+      "scale":    [1, 1, 1],
+      "mesh":     { "type": "box", "width": 1, "height": 1, "depth": 1 },
+      "material": "CubeMat"
+    },
+
+    {
+      "name": "UVSphere",
+      "position": [-2, 0.5, 0],
+      "rotation": [0, 0, 0, 1],
+      "scale":    [1, 1, 1],
+      "mesh":     { "type": "uvsphere", "radius": 0.5 },
+      "material": "UVSphereMat"
+    },
+
+    {
+      "name": "IcoSphere",
+      "position": [2, 0.5, 0],
+      "rotation": [0, 0, 0, 1],
+      "scale":    [1, 1, 1],
+      "mesh":     { "type": "icosphere", "radius": 0.5 },
+      "material": "IcoSphereMat"
+    },
+
+    {
+      "name": "Floor",
+      "position": [0, 0, 0],
+      "rotation": [0, 0, 0, 1],
+      "scale":    [1, 1, 1],
+      "mesh":     { "type": "plane", "width": 12, "depth": 12 },
+      "material": "FloorMat"
+    },
+
+    {
+      "_comment": "Back wall: createPlane is XZ-horizontal; rotated +90° around X so it stands vertical. Quaternion [sin(π/4), 0, 0, cos(π/4)] = [0.7071, 0, 0, 0.7071]. Centred at y=2.5 to sit flush on the floor.",
+      "name": "BackWall",
+      "position": [0, 2.5, -6],
+      "rotation": [0.7071, 0, 0, 0.7071],
+      "scale":    [1, 1, 1],
+      "mesh":     { "type": "plane", "width": 12, "depth": 5 },
+      "material": "WallMat"
+    }
+  ]
+}

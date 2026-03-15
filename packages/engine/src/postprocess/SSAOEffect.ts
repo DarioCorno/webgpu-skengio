@@ -13,6 +13,7 @@ import ssaoCompositeWGSL from '../shaders/ssao_composite.wgsl?raw';
 import { PassType, type RenderGraph, type VirtualResourceId } from '../rendergraph/RenderGraph';
 import type { PostProcessEffect, PostProcessContext } from './PostProcessStack';
 import { HDR_COLOR_FORMAT } from '../pipelines/PipelineManager';
+import { BindGroupCache } from '../core/BindGroupCache';
 
 // SSAOParams uniform layout (must match SSAOParams in ssao_compute.wgsl / ssao_blur.wgsl)
 const SSAO_PARAMS_SIZE = 32; // 8 × f32
@@ -63,6 +64,11 @@ export class SSAOEffect implements PostProcessEffect {
 
     // Cached refs
     private _backend:         PostProcessContext['backend'] | null = null;
+
+    // Bind group caches (avoid per-frame createBindGroup allocations)
+    private _computeBGCache  = new BindGroupCache();
+    private _blurBGCache     = new BindGroupCache();
+    private _compositeBGCache = new BindGroupCache();
 
     init(ctx: PostProcessContext): void {
         this._backend = ctx.backend;
@@ -194,18 +200,21 @@ export class SSAOEffect implements PostProcessEffect {
                 const aoView     = ctx.resolveVirtualTexture(aoRaw);
                 if (!depthView || !normalView || !aoView) return;
 
-                const bg = ctx.backend.device.createBindGroup({
-                    label:  'SSAO/Compute/BG',
-                    layout: computePipeline.getBindGroupLayout(0),
-                    entries: [
-                        { binding: 0, resource: { buffer: perFrameBuffer } },
-                        { binding: 1, resource: depthView },
-                        { binding: 2, resource: normalView },
-                        { binding: 3, resource: { buffer: paramsBuffer } },
-                        { binding: 4, resource: aoView },
-                        { binding: 5, resource: { buffer: kernelBuffer } },
-                    ],
-                });
+                const bg = this._computeBGCache.getOrCreate(
+                    [depthView, normalView, aoView],
+                    () => ctx.backend.device.createBindGroup({
+                        label:  'SSAO/Compute/BG',
+                        layout: computePipeline.getBindGroupLayout(0),
+                        entries: [
+                            { binding: 0, resource: { buffer: perFrameBuffer } },
+                            { binding: 1, resource: depthView },
+                            { binding: 2, resource: normalView },
+                            { binding: 3, resource: { buffer: paramsBuffer } },
+                            { binding: 4, resource: aoView },
+                            { binding: 5, resource: { buffer: kernelBuffer } },
+                        ],
+                    }),
+                );
 
                 const cp = passEncoder as GPUComputePassEncoder;
                 cp.setPipeline(computePipeline);
@@ -234,15 +243,18 @@ export class SSAOEffect implements PostProcessEffect {
                 const aoOutView  = ctx.resolveVirtualTexture(aoBlurred);
                 if (!aoInView || !aoOutView) return;
 
-                const bg = ctx.backend.device.createBindGroup({
-                    label:  'SSAO/Blur/BG',
-                    layout: blurPipeline.getBindGroupLayout(0),
-                    entries: [
-                        { binding: 0, resource: aoInView },
-                        { binding: 1, resource: { buffer: paramsBuffer } },
-                        { binding: 2, resource: aoOutView },
-                    ],
-                });
+                const bg = this._blurBGCache.getOrCreate(
+                    [aoInView, aoOutView],
+                    () => ctx.backend.device.createBindGroup({
+                        label:  'SSAO/Blur/BG',
+                        layout: blurPipeline.getBindGroupLayout(0),
+                        entries: [
+                            { binding: 0, resource: aoInView },
+                            { binding: 1, resource: { buffer: paramsBuffer } },
+                            { binding: 2, resource: aoOutView },
+                        ],
+                    }),
+                );
 
                 const cp = passEncoder as GPUComputePassEncoder;
                 cp.setPipeline(blurPipeline);
@@ -277,15 +289,18 @@ export class SSAOEffect implements PostProcessEffect {
                 const aoView  = ctx.resolveVirtualTexture(aoBlurred);
                 if (!hdrView || !aoView) return;
 
-                const bg = ctx.backend.device.createBindGroup({
-                    label:  'SSAO/Composite/BG',
-                    layout: compositePipeline.getBindGroupLayout(0),
-                    entries: [
-                        { binding: 0, resource: hdrView },
-                        { binding: 1, resource: aoView },
-                        { binding: 2, resource: linearSampler },
-                    ],
-                });
+                const bg = this._compositeBGCache.getOrCreate(
+                    [hdrView, aoView],
+                    () => ctx.backend.device.createBindGroup({
+                        label:  'SSAO/Composite/BG',
+                        layout: compositePipeline.getBindGroupLayout(0),
+                        entries: [
+                            { binding: 0, resource: hdrView },
+                            { binding: 1, resource: aoView },
+                            { binding: 2, resource: linearSampler },
+                        ],
+                    }),
+                );
 
                 const rp = passEncoder as GPURenderPassEncoder;
                 rp.setPipeline(compositePipeline);
@@ -306,5 +321,8 @@ export class SSAOEffect implements PostProcessEffect {
         this._blurPipeline      = null;
         this._compositePipeline = null;
         this._linearSampler     = null;
+        this._computeBGCache.clear();
+        this._blurBGCache.clear();
+        this._compositeBGCache.clear();
     }
 }

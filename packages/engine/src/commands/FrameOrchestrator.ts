@@ -31,6 +31,7 @@ import type { PostProcessStack, PostProcessContext } from '../postprocess/PostPr
 import type { EngineConfiguration } from '../core/EngineConfiguration';
 import type { AnimationSystem } from '../animation/AnimationSystem';
 import type { Engine } from '../Engine';
+import { BindGroupCache } from '../core/BindGroupCache';
 
 // -------------------------------------------------------------------------
 // Per-frame uniform buffer layout (must match the WGSL PerFrameUniforms struct)
@@ -379,6 +380,21 @@ export class FrameOrchestrator {
     /** Reusable Map for instance batch grouping — cleared each frame instead of reallocated. */
     private _batchGroupMap:      Map<string, { drawables: DrawableRef[]; baseDefines: ShaderDefines; }> = new Map();
 
+    // --- Bind group caches (avoid per-frame createBindGroup allocations) -----
+    private _ddBGCache          = new BindGroupCache();   // depth downsample
+    private _lightingGBufBGCache = new BindGroupCache();  // deferred lighting G-Buffer BG
+    private _fwdSceneBlitBGCache = new BindGroupCache();  // forward scene blit
+    private _refrDsBGCache      = new BindGroupCache();   // refraction downsample
+    private _blitPresentBGCache = new BindGroupCache();   // present/tonemap blit
+    /** Per-variant cache for forward pass @group(0) bind groups. */
+    private _fwdPerFrameBGCache: Map<string, BindGroupCache> = new Map();
+    /** Skinned shadow: Map<jointBuffer, sparseArray[drawIndex] = bindGroup>. */
+    private _skinnedShadowBGPool: Map<GPUBuffer, GPUBindGroup[]> = new Map();
+    /** Skinned G-Buffer: Map<variantKey, Map<jointBuffer, sparseArray[drawIndex] = bindGroup>>. */
+    private _skinnedGBufBGPool: Map<string, Map<GPUBuffer, GPUBindGroup[]>> = new Map();
+    /** Linear-clamp sampler for forward transparent pass (created once, not per-frame). */
+    private _forwardLinearSampler: GPUSampler | null = null;
+
     // --- GPU timestamp query (hardware GPU timing) --------------------------
     private _tsQuerySet:       GPUQuerySet | null = null;
     private _tsResolveBuffer:  GPUBuffer | null = null;
@@ -613,6 +629,15 @@ export class FrameOrchestrator {
             addressModeV: 'clamp-to-edge',
             magFilter:    'nearest',
             minFilter:    'nearest',
+        });
+
+        // Linear-clamp sampler for forward transparent pass refraction sampling.
+        this._forwardLinearSampler = this._backend.device.createSampler({
+            label:        'Forward/LinearClampSampler',
+            magFilter:    'linear',
+            minFilter:    'linear',
+            addressModeU: 'clamp-to-edge',
+            addressModeV: 'clamp-to-edge',
         });
 
         // PCF comparison sampler for shadow atlas reads.
@@ -1421,22 +1446,29 @@ export class FrameOrchestrator {
                                         // Skinned draw: per-draw bind group with model matrix + joint buffer.
                                         const jointBuf = this._animationSystem!.getJointBuffer(skinHandle!);
                                         if (!jointBuf) continue;
-                                        const skinnedModelBGL = this._shadowSkinnedPipeline!.getBindGroupLayout(2);
-                                        const skinnedBG = this._backend.device.createBindGroup({
-                                            label:   `Shadow/Skinned/G2/draw${i}`,
-                                            layout:  skinnedModelBGL,
-                                            entries: [
-                                                {
-                                                    binding:  0,
-                                                    resource: {
-                                                        buffer: this._modelMatBuffer!,
-                                                        offset: i * MODEL_UNIFORM_STRIDE,
-                                                        size:   MODEL_MATRIX_SIZE,
+                                        // Cache skinned shadow BGs: pool[jointBuf][drawIndex]
+                                        let slotArr = this._skinnedShadowBGPool.get(jointBuf);
+                                        if (!slotArr) { slotArr = []; this._skinnedShadowBGPool.set(jointBuf, slotArr); }
+                                        let skinnedBG = slotArr[i];
+                                        if (!skinnedBG) {
+                                            const skinnedModelBGL = this._shadowSkinnedPipeline!.getBindGroupLayout(2);
+                                            skinnedBG = this._backend.device.createBindGroup({
+                                                label:   `Shadow/Skinned/G2/draw${i}`,
+                                                layout:  skinnedModelBGL,
+                                                entries: [
+                                                    {
+                                                        binding:  0,
+                                                        resource: {
+                                                            buffer: this._modelMatBuffer!,
+                                                            offset: i * MODEL_UNIFORM_STRIDE,
+                                                            size:   MODEL_MATRIX_SIZE,
+                                                        },
                                                     },
-                                                },
-                                                { binding: 1, resource: { buffer: jointBuf } },
-                                            ],
-                                        });
+                                                    { binding: 1, resource: { buffer: jointBuf } },
+                                                ],
+                                            });
+                                            slotArr[i] = skinnedBG;
+                                        }
                                         rp.setBindGroup(2, skinnedBG);
                                     } else {
                                         rp.setBindGroup(2, this._shadowModelMatBGs[i]!);
@@ -1660,14 +1692,17 @@ export class FrameOrchestrator {
                 const dstView = this._resolveVirtualTexture(halfDepth);
                 if (!srcView || !dstView) return;
 
-                const bg = this._backend.device.createBindGroup({
-                    label:  'DepthDownsample/BG',
-                    layout: ddPipeline.getBindGroupLayout(0),
-                    entries: [
-                        { binding: 0, resource: srcView },
-                        { binding: 1, resource: dstView },
-                    ],
-                });
+                const bg = this._ddBGCache.getOrCreate(
+                    [srcView, dstView],
+                    () => this._backend.device.createBindGroup({
+                        label:  'DepthDownsample/BG',
+                        layout: ddPipeline.getBindGroupLayout(0),
+                        entries: [
+                            { binding: 0, resource: srcView },
+                            { binding: 1, resource: dstView },
+                        ],
+                    }),
+                );
 
                 const cp = passEncoder as GPUComputePassEncoder;
                 cp.setPipeline(ddPipeline);
@@ -1807,25 +1842,34 @@ export class FrameOrchestrator {
                     rp.setBindGroup(1, matBG);
 
                     if (isSkinned) {
-                        // Skinned draw: create a per-draw bind group with model matrix + joint buffer.
+                        // Skinned draw: per-draw bind group with model matrix + joint buffer.
                         const jointBuf = this._animationSystem!.getJointBuffer(skinHandle!);
                         if (!jointBuf) continue;
-                        const mmBGL = activePipeline.getBindGroupLayout(2);
-                        const skinnedBG = this._backend.device.createBindGroup({
-                            label:   `GBuffer/Skinned/G2/draw${i}`,
-                            layout:  mmBGL,
-                            entries: [
-                                {
-                                    binding:  0,
-                                    resource: {
-                                        buffer: this._modelMatBuffer!,
-                                        offset: i * MODEL_UNIFORM_STRIDE,
-                                        size:   MODEL_MATRIX_SIZE,
+                        // Cache skinned GBuffer BGs: pool[variantKey][jointBuf][drawIndex]
+                        let variantPool = this._skinnedGBufBGPool.get(activePipelineKey!);
+                        if (!variantPool) { variantPool = new Map(); this._skinnedGBufBGPool.set(activePipelineKey!, variantPool); }
+                        let slotArr = variantPool.get(jointBuf);
+                        if (!slotArr) { slotArr = []; variantPool.set(jointBuf, slotArr); }
+                        let skinnedBG = slotArr[i];
+                        if (!skinnedBG) {
+                            const mmBGL = activePipeline.getBindGroupLayout(2);
+                            skinnedBG = this._backend.device.createBindGroup({
+                                label:   `GBuffer/Skinned/G2/draw${i}`,
+                                layout:  mmBGL,
+                                entries: [
+                                    {
+                                        binding:  0,
+                                        resource: {
+                                            buffer: this._modelMatBuffer!,
+                                            offset: i * MODEL_UNIFORM_STRIDE,
+                                            size:   MODEL_MATRIX_SIZE,
+                                        },
                                     },
-                                },
-                                { binding: 1, resource: { buffer: jointBuf } },
-                            ],
-                        });
+                                    { binding: 1, resource: { buffer: jointBuf } },
+                                ],
+                            });
+                            slotArr[i] = skinnedBG;
+                        }
                         rp.setBindGroup(2, skinnedBG);
                     } else {
                         rp.setBindGroup(2, activeModelMatBGs[i]!);
@@ -1876,18 +1920,21 @@ export class FrameOrchestrator {
                 const depthView    = this._resolveVirtualTexture(depth, { aspect: 'depth-only' });
                 if (!albedoView || !normalView || !metallicView || !depthView) return;
 
-                // Create G-Buffer bind group per frame (transient textures change each frame).
-                const gbufferBG = this._backend.device.createBindGroup({
-                    label:   'Lighting/GBuffer/BG',
-                    layout:  gbBGL,
-                    entries: [
-                        { binding: 0, resource: albedoView },
-                        { binding: 1, resource: normalView },
-                        { binding: 2, resource: metallicView },
-                        { binding: 3, resource: depthView },
-                        { binding: 4, resource: sampler },
-                    ],
-                });
+                // Cache G-Buffer bind group — invalidated when views change (pool recycling).
+                const gbufferBG = this._lightingGBufBGCache.getOrCreate(
+                    [albedoView, normalView, metallicView, depthView],
+                    () => this._backend.device.createBindGroup({
+                        label:   'Lighting/GBuffer/BG',
+                        layout:  gbBGL!,
+                        entries: [
+                            { binding: 0, resource: albedoView! },
+                            { binding: 1, resource: normalView! },
+                            { binding: 2, resource: metallicView! },
+                            { binding: 3, resource: depthView! },
+                            { binding: 4, resource: sampler! },
+                        ],
+                    }),
+                );
 
                 const rp = passEncoder as GPURenderPassEncoder;
                 rp.setPipeline(lp);
@@ -1977,14 +2024,17 @@ export class FrameOrchestrator {
                         if (!passEncoder) return;
                         const srcView = this._resolveVirtualTexture(blitSrcId);
                         if (!srcView) return;
-                        const bg = this._backend.device.createBindGroup({
-                            label:  'ForwardSceneBlit/BG',
-                            layout: blitPipeline.getBindGroupLayout(0),
-                            entries: [
-                                { binding: 0, resource: srcView },
-                                { binding: 1, resource: blitSampler },
-                            ],
-                        });
+                        const bg = this._fwdSceneBlitBGCache.getOrCreate(
+                            [srcView],
+                            () => this._backend.device.createBindGroup({
+                                label:  'ForwardSceneBlit/BG',
+                                layout: blitPipeline.getBindGroupLayout(0),
+                                entries: [
+                                    { binding: 0, resource: srcView },
+                                    { binding: 1, resource: blitSampler },
+                                ],
+                            }),
+                        );
                         const rp = passEncoder as GPURenderPassEncoder;
                         rp.setPipeline(blitPipeline);
                         rp.setBindGroup(0, bg);
@@ -2008,14 +2058,17 @@ export class FrameOrchestrator {
                         if (!passEncoder) return;
                         const srcView = this._resolveVirtualTexture(blitSrcId);
                         if (!srcView) return;
-                        const bg = this._backend.device.createBindGroup({
-                            label:  'RefractionDownsample/BG',
-                            layout: blitPipeline.getBindGroupLayout(0),
-                            entries: [
-                                { binding: 0, resource: srcView },
-                                { binding: 1, resource: blitSampler },
-                            ],
-                        });
+                        const bg = this._refrDsBGCache.getOrCreate(
+                            [srcView],
+                            () => this._backend.device.createBindGroup({
+                                label:  'RefractionDownsample/BG',
+                                layout: blitPipeline.getBindGroupLayout(0),
+                                entries: [
+                                    { binding: 0, resource: srcView },
+                                    { binding: 1, resource: blitSampler },
+                                ],
+                            }),
+                        );
                         const rp = passEncoder as GPURenderPassEncoder;
                         rp.setPipeline(blitPipeline);
                         rp.setBindGroup(0, bg);
@@ -2044,10 +2097,7 @@ export class FrameOrchestrator {
                     const sceneColorView = this._resolveVirtualTexture(refractionSrcId);
                     if (!sceneColorView) return;
 
-                    const linearClampSampler = this._backend.device.createSampler({
-                        magFilter: 'linear', minFilter: 'linear',
-                        addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge',
-                    });
+                    const linearClampSampler = this._forwardLinearSampler!;
 
                     const transparents = this._cullResults.transparentDrawables;
                     const opaqueCount = this._dynamicDrawables.length;
@@ -2080,16 +2130,21 @@ export class FrameOrchestrator {
                             activePipelineKey = variantKey;
 
                             // @group(0): per-frame uniforms + scene color for refraction
+                            let fwdBGC = this._fwdPerFrameBGCache.get(variantKey);
+                            if (!fwdBGC) { fwdBGC = new BindGroupCache(); this._fwdPerFrameBGCache.set(variantKey, fwdBGC); }
                             const g0BGL = pipeline.getBindGroupLayout(0);
-                            const g0BG = this._backend.device.createBindGroup({
-                                label:   'Forward/PerFrame/BG',
-                                layout:  g0BGL,
-                                entries: [
-                                    { binding: 0, resource: { buffer: this._perFrameBuffers[slot]! } },
-                                    { binding: 1, resource: sceneColorView },
-                                    { binding: 2, resource: linearClampSampler },
-                                ],
-                            });
+                            const g0BG = fwdBGC.getOrCreate(
+                                [sceneColorView, this._perFrameBuffers[slot]!],
+                                () => this._backend.device.createBindGroup({
+                                    label:   'Forward/PerFrame/BG',
+                                    layout:  g0BGL,
+                                    entries: [
+                                        { binding: 0, resource: { buffer: this._perFrameBuffers[slot]! } },
+                                        { binding: 1, resource: sceneColorView! },
+                                        { binding: 2, resource: linearClampSampler },
+                                    ],
+                                }),
+                            );
                             rp.setBindGroup(0, g0BG);
                             rp.setBindGroup(3, fwdLightEnvBG);
                         }
@@ -2163,15 +2218,18 @@ export class FrameOrchestrator {
                 if (bp && bbl && sampler) {
                     const finalView = this._resolveVirtualTexture(finalColorId);
                     if (finalView) {
-                        const blitBG = this._backend.device.createBindGroup({
-                            label:   'Blit/BG',
-                            layout:  bbl,
-                            entries: [
-                                { binding: 0, resource: finalView },
-                                { binding: 1, resource: sampler },
-                                { binding: 2, resource: { buffer: this._blitExposureBuffer! } },
-                            ],
-                        });
+                        const blitBG = this._blitPresentBGCache.getOrCreate(
+                            [finalView],
+                            () => this._backend.device.createBindGroup({
+                                label:   'Blit/BG',
+                                layout:  bbl!,
+                                entries: [
+                                    { binding: 0, resource: finalView },
+                                    { binding: 1, resource: sampler! },
+                                    { binding: 2, resource: { buffer: this._blitExposureBuffer! } },
+                                ],
+                            }),
+                        );
                         presentPass.setPipeline(bp);
                         presentPass.setBindGroup(0, blitBG);
                         presentPass.draw(3);
@@ -2603,6 +2661,17 @@ export class FrameOrchestrator {
         this._inputSystem               = null;
         this._cameraControllers         = null;
         this._animationSystem           = null;
+        // Bind group caches
+        this._ddBGCache.clear();
+        this._lightingGBufBGCache.clear();
+        this._fwdSceneBlitBGCache.clear();
+        this._refrDsBGCache.clear();
+        this._blitPresentBGCache.clear();
+        for (const c of this._fwdPerFrameBGCache.values()) c.clear();
+        this._fwdPerFrameBGCache.clear();
+        this._skinnedShadowBGPool.clear();
+        this._skinnedGBufBGPool.clear();
+        this._forwardLinearSampler      = null;
     }
 }
 

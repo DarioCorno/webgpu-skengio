@@ -13,6 +13,7 @@ import ssrCompositeWGSL  from '../shaders/ssr_composite.wgsl?raw';
 import { PassType, type RenderGraph, type VirtualResourceId } from '../rendergraph/RenderGraph';
 import type { PostProcessEffect, PostProcessContext } from './PostProcessStack';
 import { HDR_COLOR_FORMAT } from '../pipelines/PipelineManager';
+import { BindGroupCache } from '../core/BindGroupCache';
 
 // Trace params: 12 × f32 = 48 bytes (must match SSRParams in ssr_trace.wgsl)
 const TRACE_PARAMS_SIZE = 48;
@@ -56,6 +57,14 @@ export class SSREffect implements PostProcessEffect {
     private _backend:         PostProcessContext['backend'] | null = null;
     private _shaderSystem:    PostProcessContext['shaderSystem'] | null = null;
     private _pipelineManager: PostProcessContext['pipelineManager'] | null = null;
+
+    // Bind group caches (avoid per-frame createBindGroup allocations)
+    private _traceBGCache      = new BindGroupCache();
+    private _downsampleBGCaches: BindGroupCache[] = Array.from({ length: MIP_LEVELS }, () => new BindGroupCache());
+    private _compositeBGCache  = new BindGroupCache();
+    // Cached cube view (avoid per-frame createView on the cubemap texture)
+    private _cachedCubeTex:  GPUTexture | null = null;
+    private _cachedCubeView: GPUTextureView | null = null;
 
     // ────────────────────────────────────────────────────────────────────
     // Lifecycle
@@ -227,17 +236,20 @@ export class SSREffect implements PostProcessEffect {
                 const ssrView      = ctx.resolveVirtualTexture(ssrTrace);
                 if (!normalView || !depthView || !ssrView) return;
 
-                const bg = ctx.backend.device.createBindGroup({
-                    label:  'SSR/Trace/BG',
-                    layout: tracePipeline.getBindGroupLayout(0),
-                    entries: [
-                        { binding: 0, resource: { buffer: perFrameBuffer } },
-                        { binding: 1, resource: normalView },
-                        { binding: 2, resource: depthView },
-                        { binding: 3, resource: { buffer: traceParamsBuffer } },
-                        { binding: 4, resource: ssrView },
-                    ],
-                });
+                const bg = this._traceBGCache.getOrCreate(
+                    [normalView, depthView, ssrView],
+                    () => ctx.backend.device.createBindGroup({
+                        label:  'SSR/Trace/BG',
+                        layout: tracePipeline.getBindGroupLayout(0),
+                        entries: [
+                            { binding: 0, resource: { buffer: perFrameBuffer } },
+                            { binding: 1, resource: normalView },
+                            { binding: 2, resource: depthView },
+                            { binding: 3, resource: { buffer: traceParamsBuffer } },
+                            { binding: 4, resource: ssrView },
+                        ],
+                    }),
+                );
 
                 const cp = passEncoder as GPUComputePassEncoder;
                 cp.setPipeline(tracePipeline);
@@ -286,14 +298,17 @@ export class SSREffect implements PostProcessEffect {
 
                     if (!srcView || !dstView) continue;
 
-                    const bg = ctx.backend.device.createBindGroup({
-                        label:  `SSR/Downsample/BG/Mip${dstMip}`,
-                        layout: downsamplePipeline.getBindGroupLayout(0),
-                        entries: [
-                            { binding: 0, resource: srcView },
-                            { binding: 1, resource: dstView },
-                        ],
-                    });
+                    const bg = this._downsampleBGCaches[dstMip]!.getOrCreate(
+                        [srcView, dstView],
+                        () => ctx.backend.device.createBindGroup({
+                            label:  `SSR/Downsample/BG/Mip${dstMip}`,
+                            layout: downsamplePipeline.getBindGroupLayout(0),
+                            entries: [
+                                { binding: 0, resource: srcView },
+                                { binding: 1, resource: dstView },
+                            ],
+                        }),
+                    );
 
                     cp.setBindGroup(0, bg);
                     cp.dispatchWorkgroups(Math.ceil(mipW / 8), Math.ceil(mipH / 8));
@@ -325,24 +340,31 @@ export class SSREffect implements PostProcessEffect {
                 const depthView    = ctx.resolveVirtualTexture(inputDepth, { aspect: 'depth-only' });
                 if (!hdrView || !traceView || !mipView || !normalView || !metallicView || !depthView) return;
 
-                const cubeView = cubeTex.createView({ dimension: 'cube', arrayLayerCount: 6 });
+                if (cubeTex !== this._cachedCubeTex) {
+                    this._cachedCubeView = cubeTex.createView({ dimension: 'cube', arrayLayerCount: 6 });
+                    this._cachedCubeTex  = cubeTex;
+                }
+                const cubeView = this._cachedCubeView!;
 
-                const bg = ctx.backend.device.createBindGroup({
-                    label:  'SSR/Composite/BG',
-                    layout: compositePipeline.getBindGroupLayout(0),
-                    entries: [
-                        { binding: 0, resource: hdrView },
-                        { binding: 1, resource: traceView },
-                        { binding: 2, resource: mipView },
-                        { binding: 3, resource: normalView },
-                        { binding: 4, resource: metallicView },
-                        { binding: 5, resource: depthView },
-                        { binding: 6, resource: cubeView },
-                        { binding: 7, resource: mipSampler },
-                        { binding: 8, resource: { buffer: perFrameBuffer } },
-                        { binding: 9, resource: { buffer: compParamsBuffer } },
-                    ],
-                });
+                const bg = this._compositeBGCache.getOrCreate(
+                    [hdrView, traceView, mipView, normalView, metallicView, depthView, cubeView],
+                    () => ctx.backend.device.createBindGroup({
+                        label:  'SSR/Composite/BG',
+                        layout: compositePipeline.getBindGroupLayout(0),
+                        entries: [
+                            { binding: 0, resource: hdrView },
+                            { binding: 1, resource: traceView },
+                            { binding: 2, resource: mipView },
+                            { binding: 3, resource: normalView },
+                            { binding: 4, resource: metallicView },
+                            { binding: 5, resource: depthView },
+                            { binding: 6, resource: cubeView },
+                            { binding: 7, resource: mipSampler },
+                            { binding: 8, resource: { buffer: perFrameBuffer } },
+                            { binding: 9, resource: { buffer: compParamsBuffer } },
+                        ],
+                    }),
+                );
 
                 const rp = passEncoder as GPURenderPassEncoder;
                 rp.setPipeline(compositePipeline);
@@ -370,5 +392,10 @@ export class SSREffect implements PostProcessEffect {
         this._linearSampler        = null;
         this._mipSampler           = null;
         this._placeholderCubeTex   = null;
+        this._traceBGCache.clear();
+        for (const c of this._downsampleBGCaches) c.clear();
+        this._compositeBGCache.clear();
+        this._cachedCubeTex  = null;
+        this._cachedCubeView = null;
     }
 }

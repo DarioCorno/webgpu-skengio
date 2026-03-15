@@ -6,6 +6,7 @@
 import { Logger } from '../core/Logger';
 import type { GPUBackend } from '../core/GPUBackend';
 import type { ResourceManager, ResourceHandle } from '../core/ResourceManager';
+import { BindGroupCache } from '../core/BindGroupCache';
 
 import backgroundWGSL        from '../shaders/background.wgsl?raw';
 import backgroundCubemapWGSL from '../shaders/background_cubemap.wgsl?raw';
@@ -73,6 +74,18 @@ export class BackgroundSystem {
     private _bindGroupLayout:   GPUBindGroupLayout | null = null;
     private _cbBindGroupLayout: GPUBindGroupLayout | null = null;
     private _sampler:           GPUSampler | null = null;
+
+    // --- Pre-allocated scratch buffers (avoid per-frame allocations) ---
+    private readonly _uniformData = new ArrayBuffer(BG_UNIFORM_SIZE);
+    private readonly _uniformU32  = new Uint32Array(this._uniformData);
+    private readonly _uniformF32  = new Float32Array(this._uniformData);
+
+    // --- Bind group caches ---
+    private _cubemapBGCache = new BindGroupCache();
+    private _regularBGCache = new BindGroupCache();
+    // Cached cube view (avoid per-frame createView on cubemap texture)
+    private _cachedCubeTex:  GPUTexture | null = null;
+    private _cachedCubeView: GPUTextureView | null = null;
 
     // -------------------------------------------------------------------------
     // Lifecycle
@@ -174,6 +187,10 @@ export class BackgroundSystem {
         this._bindGroupLayout   = null;
         this._cbBindGroupLayout = null;
         this._sampler           = null;
+        this._cubemapBGCache.clear();
+        this._regularBGCache.clear();
+        this._cachedCubeTex  = null;
+        this._cachedCubeView = null;
     }
 
     // -------------------------------------------------------------------------
@@ -209,10 +226,9 @@ export class BackgroundSystem {
 
         const cfg = this._config;
 
-        // --- Fill uniform buffer ---
-        const data = new ArrayBuffer(BG_UNIFORM_SIZE);
-        const u32  = new Uint32Array(data);
-        const f32  = new Float32Array(data);
+        // --- Fill uniform buffer (reuse pre-allocated scratch) ---
+        const u32  = this._uniformU32;
+        const f32  = this._uniformF32;
 
         // type (u32 at offset 0)
         u32[0] = cfg.type === BackgroundType.Color    ? 0
@@ -231,7 +247,7 @@ export class BackgroundSystem {
         // invViewProj (mat4x4f at offset 48 → float index 12)
         for (let i = 0; i < 16; i++) f32[12 + i] = invViewProj[i]!;
 
-        this._backend.queue.writeBuffer(this._uniformBuffer, 0, data);
+        this._backend.queue.writeBuffer(this._uniformBuffer, 0, this._uniformData);
 
         // --- Choose pipeline and create bind group ---
         const isCubemap = cfg.type === BackgroundType.Cubemap;
@@ -243,20 +259,24 @@ export class BackgroundSystem {
                 : null;
             if (!cubeTex) return; // no cubemap loaded yet
 
-            const cubeView = cubeTex.createView({
-                dimension: 'cube',
-                arrayLayerCount: 6,
-            });
+            if (cubeTex !== this._cachedCubeTex) {
+                this._cachedCubeView = cubeTex.createView({ dimension: 'cube', arrayLayerCount: 6 });
+                this._cachedCubeTex  = cubeTex;
+            }
+            const cubeView = this._cachedCubeView!;
 
-            const bg = this._backend.device.createBindGroup({
-                label:  'Background/CubeBG',
-                layout: this._cbBindGroupLayout,
-                entries: [
-                    { binding: 0, resource: { buffer: this._uniformBuffer } },
-                    { binding: 1, resource: cubeView },
-                    { binding: 2, resource: this._sampler },
-                ],
-            });
+            const bg = this._cubemapBGCache.getOrCreate(
+                [cubeView],
+                () => this._backend.device.createBindGroup({
+                    label:  'Background/CubeBG',
+                    layout: this._cbBindGroupLayout!,
+                    entries: [
+                        { binding: 0, resource: { buffer: this._uniformBuffer! } },
+                        { binding: 1, resource: cubeView },
+                        { binding: 2, resource: this._sampler! },
+                    ],
+                }),
+            );
 
             rp.setPipeline(this._cubemapPipeline);
             rp.setBindGroup(0, bg);
@@ -269,15 +289,18 @@ export class BackgroundSystem {
                 if (tex) texView = tex.createView();
             }
 
-            const bg = this._backend.device.createBindGroup({
-                label:  'Background/BG',
-                layout: this._bindGroupLayout,
-                entries: [
-                    { binding: 0, resource: { buffer: this._uniformBuffer } },
-                    { binding: 1, resource: texView },
-                    { binding: 2, resource: this._sampler },
-                ],
-            });
+            const bg = this._regularBGCache.getOrCreate(
+                [texView],
+                () => this._backend.device.createBindGroup({
+                    label:  'Background/BG',
+                    layout: this._bindGroupLayout!,
+                    entries: [
+                        { binding: 0, resource: { buffer: this._uniformBuffer! } },
+                        { binding: 1, resource: texView },
+                        { binding: 2, resource: this._sampler! },
+                    ],
+                }),
+            );
 
             rp.setPipeline(this._pipeline);
             rp.setBindGroup(0, bg);

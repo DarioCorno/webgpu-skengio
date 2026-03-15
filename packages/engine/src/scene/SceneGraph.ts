@@ -106,6 +106,14 @@ export class SceneGraph {
     private _nodes: Map<NodeHandle, SceneNode> = new Map();
     private _rootNodes: NodeHandle[] = [];
 
+    /**
+     * Set of nodes whose subtrees need world-matrix recomputation.
+     * A "dirty root" is the highest ancestor in a dirty chain — its parent
+     * (if any) is NOT dirty, but the node itself and all its descendants are.
+     * Maintained by _markDirty(); consumed and cleared by updateWorldMatrices().
+     */
+    private _dirtyRoots: Set<NodeHandle> = new Set();
+
     // Pooled cull result arrays — cleared and reused each frame instead of reallocated.
     private _cullOpaque:      DrawableRef[] = [];
     private _cullTransparent: DrawableRef[] = [];
@@ -145,6 +153,14 @@ export class SceneGraph {
             parentNode?.children.push(handle);
         } else {
             this._rootNodes.push(handle);
+        }
+
+        // New nodes need their world matrix computed on the next update.
+        // If the parent is already dirty, its subtree traversal covers this
+        // child — no need for a separate dirty root entry.
+        const parentDirty = parent !== undefined && this._nodes.get(parent)?.dirty;
+        if (!parentDirty) {
+            this._dirtyRoots.add(handle);
         }
 
         return handle;
@@ -241,12 +257,30 @@ export class SceneGraph {
     }
 
     /**
-     * Recompute world matrices for all dirty nodes (top-down traversal).
+     * Recompute world matrices for dirty subtrees only.
+     *
+     * Instead of traversing the full hierarchy every frame, only the subtrees
+     * rooted at nodes that were dirtied since the last call are visited.
+     * For mostly-static scenes this skips the vast majority of nodes.
      */
     updateWorldMatrices(): void {
-        for (const root of this._rootNodes) {
-            this._updateRecursive(root, SceneGraph.identityMat4());
+        if (this._dirtyRoots.size === 0) return;
+
+        for (const handle of this._dirtyRoots) {
+            // Resolve the parent's world matrix to propagate from.
+            const node = this._nodes.get(handle);
+            if (!node) continue;
+            let parentWorld: Mat4;
+            if (node.parent !== null) {
+                const parentNode = this._nodes.get(node.parent);
+                parentWorld = parentNode ? parentNode.worldMatrix : SceneGraph.identityMat4();
+            } else {
+                parentWorld = SceneGraph.identityMat4();
+            }
+            this._updateRecursive(handle, parentWorld);
         }
+
+        this._dirtyRoots.clear();
     }
 
     // -------------------------------------------------------------------------
@@ -379,12 +413,43 @@ export class SceneGraph {
     // Internal helpers
     // -------------------------------------------------------------------------
 
-    private _markDirty(handle: NodeHandle): void {
+    /**
+     * Internal recursive helper — marks node + descendants dirty without
+     * touching _dirtyRoots (that's handled by the public entry point).
+     */
+    private _markDirtyRecursive(handle: NodeHandle): void {
         const node = this._nodes.get(handle);
         if (!node || node.dirty) return;
         node.dirty = true;
         for (const child of node.children) {
-            this._markDirty(child);
+            this._markDirtyRecursive(child);
+        }
+    }
+
+    /**
+     * Mark a node and all its descendants as needing world-matrix recomputation.
+     * The dirtied node is registered as a "dirty root" so updateWorldMatrices()
+     * only traverses affected subtrees instead of the full hierarchy.
+     */
+    private _markDirty(handle: NodeHandle): void {
+        const node = this._nodes.get(handle);
+        if (!node || node.dirty) return;
+
+        // Register as dirty root. If an ancestor is already a dirty root,
+        // this node's subtree is already covered — but since ancestors are
+        // NOT marked dirty by setLocalTransform (only descendants are),
+        // there's no overlap: each _markDirty call creates a new dirty root.
+        this._dirtyRoots.add(handle);
+
+        // Remove any children that were previously dirty roots on their own —
+        // they're now covered by this higher-level dirty root.
+        for (const child of node.children) {
+            this._dirtyRoots.delete(child);
+        }
+
+        node.dirty = true;
+        for (const child of node.children) {
+            this._markDirtyRecursive(child);
         }
     }
 
@@ -392,14 +457,18 @@ export class SceneGraph {
         const node = this._nodes.get(handle);
         if (!node) return;
 
-        if (node.dirty) {
-            const { position, rotation, scale } = node.localTransform;
-            // Build the local TRS matrix, then concatenate with the parent world matrix.
-            // mat4.fromRotationTranslationScale applies scale → rotate → translate.
-            mat4.fromRotationTranslationScale(node.worldMatrix, rotation, position, scale);
-            mat4.multiply(node.worldMatrix, parentWorld, node.worldMatrix);
-            node.dirty = false;
+        if (!node.dirty) {
+            // _markDirty() propagates to all descendants, so if this node
+            // is clean, the entire subtree is clean — skip it entirely.
+            return;
         }
+
+        const { position, rotation, scale } = node.localTransform;
+        // Build the local TRS matrix, then concatenate with the parent world matrix.
+        // mat4.fromRotationTranslationScale applies scale → rotate → translate.
+        mat4.fromRotationTranslationScale(node.worldMatrix, rotation, position, scale);
+        mat4.multiply(node.worldMatrix, parentWorld, node.worldMatrix);
+        node.dirty = false;
 
         for (const child of node.children) {
             this._updateRecursive(child, node.worldMatrix);
@@ -431,6 +500,7 @@ export class SceneGraph {
     destroy(): void {
         this._nodes.clear();
         this._rootNodes.length = 0;
+        this._dirtyRoots.clear();
     }
 }
 

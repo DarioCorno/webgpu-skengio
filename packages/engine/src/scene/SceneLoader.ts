@@ -85,30 +85,6 @@ interface SSAOConfigJSON {
     blurSharpness?:  number;
 }
 
-/** SSR configuration block. */
-interface SSRConfigJSON {
-    /** Enable/disable SSR (default: true). */
-    enabled?:         boolean;
-    /** Maximum ray march steps (default: 128). */
-    maxRaySteps?:     number;
-    /** View-space thickness in meters (default: 0.3). */
-    thickness?:       number;
-    /** Ray march stride (default: 2.0). */
-    stride?:          number;
-    /** Edge fade end (default: 0.85). */
-    fadeEnd?:         number;
-    /** Roughness cutoff (default: 0.7). */
-    roughnessCutoff?: number;
-    /** Jitter scale (default: 1.0). */
-    jitterScale?:     number;
-    /** World-space max ray distance (default: 50.0). */
-    maxDistance?:      number;
-    /** Adaptive stride depth factor (default: 0.01). */
-    strideZCutoff?:   number;
-    /** Cubemap fallback strength 0..1 (default: 0.5). */
-    envFallbackStr?:  number;
-}
-
 /** Environment configuration block. */
 interface EnvConfigJSON {
     background?: BackgroundJSON;
@@ -116,8 +92,6 @@ interface EnvConfigJSON {
     ambient?: [number, number, number];
     /** Screen-space ambient occlusion settings. */
     ssao?: SSAOConfigJSON;
-    /** Screen-space reflections settings. */
-    ssr?: SSRConfigJSON;
 }
 
 /**
@@ -641,24 +615,6 @@ export class SceneLoader {
                 if (ssaoCfg.intensity !== undefined)     ssaoEffect.intensity     = ssaoCfg.intensity;
                 if (ssaoCfg.sampleCount !== undefined)   ssaoEffect.sampleCount   = ssaoCfg.sampleCount;
                 if (ssaoCfg.blurSharpness !== undefined) ssaoEffect.blurSharpness = ssaoCfg.blurSharpness;
-            }
-        }
-
-        // 2e. SSR ──────────────────────────────────────────────────────────
-        if (scene.envConfig?.ssr !== undefined) {
-            const ssrCfg = scene.envConfig.ssr;
-            const ssrEffect = engine.postProcess.getEffect<import('../postprocess/SSREffect').SSREffect>('SSR');
-            if (ssrEffect) {
-                if (ssrCfg.enabled !== undefined)        ssrEffect.enabled        = ssrCfg.enabled;
-                if (ssrCfg.maxRaySteps !== undefined)    ssrEffect.maxRaySteps    = ssrCfg.maxRaySteps;
-                if (ssrCfg.thickness !== undefined)      ssrEffect.thickness      = ssrCfg.thickness;
-                if (ssrCfg.stride !== undefined)         ssrEffect.stride         = ssrCfg.stride;
-                if (ssrCfg.fadeEnd !== undefined)        ssrEffect.fadeEnd        = ssrCfg.fadeEnd;
-                if (ssrCfg.roughnessCutoff !== undefined) ssrEffect.roughnessCutoff = ssrCfg.roughnessCutoff;
-                if (ssrCfg.jitterScale !== undefined)    ssrEffect.jitterScale    = ssrCfg.jitterScale;
-                if (ssrCfg.maxDistance !== undefined)     ssrEffect.maxDistance     = ssrCfg.maxDistance;
-                if (ssrCfg.strideZCutoff !== undefined)   ssrEffect.strideZCutoff   = ssrCfg.strideZCutoff;
-                if (ssrCfg.envFallbackStr !== undefined)  ssrEffect.envFallbackStr  = ssrCfg.envFallbackStr;
             }
         }
 

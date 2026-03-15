@@ -170,10 +170,6 @@ export class FXAAEffect implements PostProcessEffect {
 // Depth-buffer effects
 // ─────────────────────────────────────────────────────────────────────────────
 
-// SSR is implemented in its own file: SSREffect.ts
-import { SSREffect } from './SSREffect';
-export { SSREffect } from './SSREffect';
-
 // SSAO is implemented in its own file: SSAOEffect.ts
 import { SSAOEffect } from './SSAOEffect';
 export { SSAOEffect } from './SSAOEffect';
@@ -249,7 +245,6 @@ export class PostProcessStack {
         // Default chain order.
         this._effects = [
             new SSAOEffect(),
-            new SSREffect(),
             new VolumetricFogEffect(),
             new ContactShadowsEffect(),
             new BloomEffect(),

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, inject, computed } from 'vue';
 import type { Ref } from 'vue';
-import { type Engine, type SSAOEffect, type SSREffect, BackgroundType } from '@skengio/engine';
+import { type Engine, type SSAOEffect, BackgroundType } from '@skengio/engine';
 import NumericInput from '../NumericInput.vue';
 import CollapsibleSection from '../CollapsibleSection.vue';
 import ColorSwatch from '../ColorSwatch.vue';
@@ -32,18 +32,6 @@ const ssaoBias = ref(0.02);
 const ssaoIntensity = ref(1.5);
 const ssaoSamples = ref(16);
 const ssaoBlurSharpness = ref(10.0);
-
-// SSR
-const ssrEnabled = ref(true);
-const ssrMaxRaySteps = ref(64);
-const ssrThickness = ref(0.3);
-const ssrStride = ref(2.0);
-const ssrFadeEnd = ref(0.8);
-const ssrRoughnessCutoff = ref(0.4);
-const ssrJitterScale = ref(1.0);
-const ssrMaxDistance = ref(50.0);
-const ssrStrideZCutoff = ref(0.01);
-const ssrEnvFallbackStr = ref(0.5);
 
 // Background
 const bgType = ref<BackgroundType>(BackgroundType.Gradient);
@@ -112,20 +100,6 @@ function readFromEngine() {
         ssaoBlurSharpness.value = ssao.blurSharpness;
     }
 
-    // SSR
-    const ssr = props.engine.postProcess.getEffect<SSREffect>('SSR');
-    if (ssr) {
-        ssrEnabled.value = ssr.enabled;
-        ssrMaxRaySteps.value = ssr.maxRaySteps;
-        ssrThickness.value = ssr.thickness;
-        ssrStride.value = ssr.stride;
-        ssrFadeEnd.value = ssr.fadeEnd;
-        ssrRoughnessCutoff.value = ssr.roughnessCutoff;
-        ssrJitterScale.value = ssr.jitterScale;
-        ssrMaxDistance.value = ssr.maxDistance;
-        ssrStrideZCutoff.value = ssr.strideZCutoff;
-        ssrEnvFallbackStr.value = ssr.envFallbackStr;
-    }
 }
 
 // --- Updaters ---
@@ -297,30 +271,6 @@ function setSSAO(field: string, v: number) {
     }
 }
 
-// SSR updaters
-function toggleSSR() {
-    ssrEnabled.value = !ssrEnabled.value;
-    const ssr = props.engine.postProcess.getEffect<SSREffect>('SSR');
-    if (ssr) ssr.enabled = ssrEnabled.value;
-}
-
-function setSSR(field: string, v: number) {
-    const ssr = props.engine.postProcess.getEffect<SSREffect>('SSR');
-    if (!ssr) return;
-    (ssr as any)[field] = v;
-    switch (field) {
-        case 'maxRaySteps': ssrMaxRaySteps.value = v; break;
-        case 'thickness': ssrThickness.value = v; break;
-        case 'stride': ssrStride.value = v; break;
-        case 'fadeEnd': ssrFadeEnd.value = v; break;
-        case 'roughnessCutoff': ssrRoughnessCutoff.value = v; break;
-        case 'jitterScale': ssrJitterScale.value = v; break;
-        case 'maxDistance': ssrMaxDistance.value = v; break;
-        case 'strideZCutoff': ssrStrideZCutoff.value = v; break;
-        case 'envFallbackStr': ssrEnvFallbackStr.value = v; break;
-    }
-}
-
 onMounted(readFromEngine);
 </script>
 
@@ -458,54 +408,6 @@ onMounted(readFromEngine);
                 <div class="prop-label" v-on="hint('ssaoBlurSharpness')">Blur Sharpness</div>
                 <div class="single-row">
                     <NumericInput :model-value="ssaoBlurSharpness" :step="1" :min="0" :max="50" :precision="1" @update:model-value="v => setSSAO('blurSharpness', v)" />
-                </div>
-            </template>
-        </CollapsibleSection>
-
-        <!-- SSR -->
-        <CollapsibleSection title="SSR" icon="fas fa-water" icon-color="#77bbdd">
-            <div class="prop-row clickable" @click="toggleSSR" v-on="hint('ssrEnabled')">
-                <span>Enabled</span>
-                <span class="prop-value">
-                    <i class="fas" :class="ssrEnabled ? 'fa-toggle-on toggle-on' : 'fa-toggle-off toggle-off'"></i>
-                </span>
-            </div>
-            <template v-if="ssrEnabled">
-                <div class="prop-label" v-on="hint('ssrMaxRaySteps')">Max Ray Steps</div>
-                <div class="single-row">
-                    <NumericInput :model-value="ssrMaxRaySteps" :step="8" :min="8" :max="256" :precision="0" @update:model-value="v => setSSR('maxRaySteps', v)" />
-                </div>
-                <div class="prop-label" v-on="hint('ssrThickness')">Thickness (m)</div>
-                <div class="single-row">
-                    <NumericInput :model-value="ssrThickness" :step="0.05" :min="0.05" :max="2" :precision="2" @update:model-value="v => setSSR('thickness', v)" />
-                </div>
-                <div class="prop-label" v-on="hint('ssrStride')">Stride</div>
-                <div class="single-row">
-                    <NumericInput :model-value="ssrStride" :step="0.5" :min="0.5" :max="8" :precision="1" @update:model-value="v => setSSR('stride', v)" />
-                </div>
-                <div class="prop-label" v-on="hint('ssrFadeEnd')">Fade End</div>
-                <div class="single-row">
-                    <NumericInput :model-value="ssrFadeEnd" :step="0.05" :min="0" :max="1" :precision="2" @update:model-value="v => setSSR('fadeEnd', v)" />
-                </div>
-                <div class="prop-label" v-on="hint('ssrRoughnessCutoff')">Roughness Cutoff</div>
-                <div class="single-row">
-                    <NumericInput :model-value="ssrRoughnessCutoff" :step="0.05" :min="0" :max="1" :precision="2" @update:model-value="v => setSSR('roughnessCutoff', v)" />
-                </div>
-                <div class="prop-label" v-on="hint('ssrJitterScale')">Jitter Scale</div>
-                <div class="single-row">
-                    <NumericInput :model-value="ssrJitterScale" :step="0.1" :min="0" :max="2" :precision="2" @update:model-value="v => setSSR('jitterScale', v)" />
-                </div>
-                <div class="prop-label" v-on="hint('ssrMaxDistance')">Max Distance (m)</div>
-                <div class="single-row">
-                    <NumericInput :model-value="ssrMaxDistance" :step="5" :min="1" :max="200" :precision="1" @update:model-value="v => setSSR('maxDistance', v)" />
-                </div>
-                <div class="prop-label" v-on="hint('ssrStrideZCutoff')">Stride Z Cutoff</div>
-                <div class="single-row">
-                    <NumericInput :model-value="ssrStrideZCutoff" :step="0.005" :min="0" :max="0.1" :precision="3" @update:model-value="v => setSSR('strideZCutoff', v)" />
-                </div>
-                <div class="prop-label" v-on="hint('ssrEnvFallback')">Env Fallback Strength</div>
-                <div class="single-row">
-                    <NumericInput :model-value="ssrEnvFallbackStr" :step="0.05" :min="0" :max="1" :precision="2" @update:model-value="v => setSSR('envFallbackStr', v)" />
                 </div>
             </template>
         </CollapsibleSection>

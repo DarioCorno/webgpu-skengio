@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { shallowRef, ref, provide, onMounted, onBeforeUnmount } from 'vue';
 import {
-    type Engine, type SSAOEffect, type SSREffect, type SceneNode, type LightRecord,
+    type Engine, type SSAOEffect, type SceneNode, type LightRecord,
     BackgroundType, NodeType, LightType, ShadowType, ProjectionType,
 } from '@skengio/engine';
 import Viewport from './components/Viewport.vue';
@@ -184,24 +184,6 @@ function syncEngineStateToSceneData() {
         env.ssao = { enabled: false };
     }
 
-    // SSR
-    const ssr = e.postProcess.getEffect<SSREffect>('SSR');
-    if (ssr) {
-        env.ssr = {
-            enabled: ssr.enabled,
-            maxRaySteps: ssr.maxRaySteps,
-            thickness: ssr.thickness,
-            stride: ssr.stride,
-            fadeEnd: ssr.fadeEnd,
-            roughnessCutoff: ssr.roughnessCutoff,
-            jitterScale: ssr.jitterScale,
-            maxDistance: ssr.maxDistance,
-            strideZCutoff: ssr.strideZCutoff,
-            envFallbackStr: ssr.envFallbackStr,
-        };
-    } else if (!env.ssr) {
-        env.ssr = { enabled: false };
-    }
 
     // ── Node transforms + lights + animation ────────────────────────────
     // Build label → engine node lookup (first match wins for duplicate labels)

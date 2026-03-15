@@ -59,7 +59,7 @@ export { FrameOrchestrator } from './commands/FrameOrchestrator';
 export type { FrameStats, PerFrameUniforms } from './commands/FrameOrchestrator';
 
 // Post-Processing
-export { PostProcessStack, BloomEffect, TonemapEffect, TAAEffect, FXAAEffect, SSREffect, SSAOEffect } from './postprocess/PostProcessStack';
+export { PostProcessStack, BloomEffect, TonemapEffect, TAAEffect, FXAAEffect, SSAOEffect } from './postprocess/PostProcessStack';
 export type { PostProcessEffect, PostProcessContext } from './postprocess/PostProcessStack';
 
 // Environment / Background

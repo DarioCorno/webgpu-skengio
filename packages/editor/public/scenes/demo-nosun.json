@@ -1,20 +1,28 @@
 {
   "_comment": "demo.json — full scene exercising every engine feature: camera, controllers, textures, PBR materials, procedural meshes, directional / point / spot lights.",
-
   "engineConfig": {
     "shadowAtlasSize": 2048,
     "defaultShadowMapResolution": 512,
     "maxAnisotropy": 4,
     "frustumCulling": true,
     "showEditorPanel": true,
-    "showStats": true
+    "showStats": true,
+    "tonemapOperator": "ACES"
   },
-
   "camera": {
-    "position": [0, 1.5, 5],
-    "rotation": [0, 0, 0, 1],
+    "position": [
+      -2.3833606243133545,
+      1.3393052816390991,
+      3.1841375827789307
+    ],
+    "rotation": [
+      -0.07937148213386536,
+      -0.2878313660621643,
+      -0.023945016786456108,
+      0.9540858864784241
+    ],
     "projection": "perspective",
-    "fovY": 60,
+    "fovY": 59.99999999999999,
     "near": 0.1,
     "far": 200,
     "exposure": 0,
@@ -22,162 +30,410 @@
     "controllers": [
       {
         "type": "freelook",
+        "active": true,
+        "invertX": false,
+        "invertY": false,
         "moveSpeed": 5,
         "lookSensitivity": 0.002,
-        "sprintMultiplier": 3,
-        "active": true
+        "sprintMultiplier": 3
       }
     ]
   },
-
   "textures": {
-    "brick_diffuse":  "/textures/brick-wall-diffuse.jpg",
-    "rust_diffuse":   "/textures/rust-ground-diffuse.jpg",
-    "rust_normal":    "/textures/rust-ground-normal.jpg",
-    "rust_roughness": "/textures/rust-ground-roguhness.jpg"
+    "brick_diffuse": "/textures/brick-wall-diffuse.jpg",
+    "rust_diffuse": "/textures/rust-ground-diffuse.jpg",
+    "rust_normal": "/textures/rust-ground-normal.jpg",
+    "rust_roughness": "/textures/rust-ground-roguhness.jpg",
+    "water.jpg": "/textures/water.jpg"
   },
-
   "materials": {
     "CubeMat": {
-      "baseColorFactor": [0.9, 0.7, 0.4, 1.0],
-      "metallicFactor":  0.0,
+      "baseColorFactor": [
+        0.9,
+        0.7,
+        0.4,
+        1
+      ],
+      "metallicFactor": 0,
       "roughnessFactor": 0.45,
-      "emissiveFactor":  [0, 0, 0],
-      "normalScale":     1.0,
-      "occlusionStrength": 1.0,
-      "alphaCutoff":     0.5
+      "emissiveFactor": [
+        0,
+        0,
+        0
+      ],
+      "normalScale": 1,
+      "occlusionStrength": 1,
+      "alphaCutoff": 0.5,
+      "opacity": 1,
+      "ior": 1.5,
+      "shadowOpacity": 1,
+      "alphaMode": "opaque",
+      "doubleSided": false,
+      "castShadow": true
     },
     "UVSphereMat": {
-      "baseColorFactor": [0.3, 0.6, 0.9, 1.0],
-      "metallicFactor":  0.1,
+      "baseColorFactor": [
+        0.3,
+        0.6,
+        0.9,
+        1
+      ],
+      "metallicFactor": 0.1,
       "roughnessFactor": 0.6,
-      "emissiveFactor":  [0, 0, 0],
-      "normalScale":     1.0,
-      "occlusionStrength": 1.0,
-      "alphaCutoff":     0.5
+      "emissiveFactor": [
+        0,
+        0,
+        0
+      ],
+      "normalScale": 1,
+      "occlusionStrength": 1,
+      "alphaCutoff": 0.5,
+      "opacity": 1,
+      "ior": 1.5,
+      "shadowOpacity": 1,
+      "alphaMode": "opaque",
+      "doubleSided": false,
+      "castShadow": true,
+      "baseColorMap": "water.jpg"
     },
     "IcoSphereMat": {
-      "baseColorFactor": [0.8, 0.3, 0.3, 1.0],
-      "metallicFactor":  0.6,
+      "baseColorFactor": [
+        0.8,
+        0.3,
+        0.3,
+        1
+      ],
+      "metallicFactor": 0.6,
       "roughnessFactor": 0.2,
-      "emissiveFactor":  [0, 0, 0],
-      "normalScale":     1.0,
-      "occlusionStrength": 1.0,
-      "alphaCutoff":     0.5
+      "emissiveFactor": [
+        0,
+        0,
+        0
+      ],
+      "normalScale": 1,
+      "occlusionStrength": 1,
+      "alphaCutoff": 0.5,
+      "opacity": 1,
+      "ior": 1.5,
+      "shadowOpacity": 1,
+      "alphaMode": "opaque",
+      "doubleSided": false,
+      "castShadow": true
     },
     "FloorMat": {
-      "baseColorFactor":    [1.0, 1.0, 1.0, 1.0],
-      "metallicFactor":     0.0,
-      "roughnessFactor":    1.0,
-      "normalScale":        1.0,
-      "emissiveFactor":     [0, 0, 0],
-      "occlusionStrength":  1.0,
-      "alphaCutoff":        0.5,
-      "baseColorMap":       "rust_diffuse",
-      "normalMap":          "rust_normal",
-      "metallicRoughnessMap": "rust_roughness"
+      "baseColorFactor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallicFactor": 0,
+      "roughnessFactor": 1,
+      "normalScale": 1,
+      "emissiveFactor": [
+        0,
+        0,
+        0
+      ],
+      "occlusionStrength": 1,
+      "alphaCutoff": 0.5,
+      "baseColorMap": "rust_diffuse",
+      "normalMap": "rust_normal",
+      "metallicRoughnessMap": "rust_roughness",
+      "opacity": 1,
+      "ior": 1.5,
+      "shadowOpacity": 1,
+      "alphaMode": "opaque",
+      "doubleSided": false,
+      "castShadow": true
     },
     "WallMat": {
-      "baseColorFactor":  [1.0, 1.0, 1.0, 1.0],
-      "metallicFactor":   0.0,
-      "roughnessFactor":  0.9,
-      "emissiveFactor":   [0, 0, 0],
-      "normalScale":      1.0,
-      "occlusionStrength": 1.0,
-      "alphaCutoff":      0.5,
-      "baseColorMap":     "brick_diffuse"
+      "baseColorFactor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallicFactor": 0,
+      "roughnessFactor": 0.9,
+      "emissiveFactor": [
+        0,
+        0,
+        0
+      ],
+      "normalScale": 1,
+      "occlusionStrength": 1,
+      "alphaCutoff": 0.5,
+      "baseColorMap": "brick_diffuse",
+      "opacity": 1,
+      "ior": 1.5,
+      "shadowOpacity": 1,
+      "alphaMode": "opaque",
+      "doubleSided": false,
+      "castShadow": true
     }
   },
-
   "nodes": [
-
     {
       "name": "AmberLight",
-      "position": [0, 3.0, 0.5],
+      "position": [
+        0,
+        3,
+        0.5
+      ],
       "light": {
-        "type":      "point",
-        "castShadow" : true,
+        "type": "point",
+        "castShadow": true,
         "shadowMapResolution": 512,
-        "color":     [1.0, 0.55, 0.15],
-        "intensity": 20.0,
-        "range":     6.0
-      }
+        "color": [
+          1,
+          0.55,
+          0.15
+        ],
+        "intensity": 20,
+        "range": 6,
+        "shadowBias": 0.005,
+        "pcfRadius": 1,
+        "shadowType": "cube",
+        "numCascades": 6
+      },
+      "rotation": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ]
     },
-
     {
       "_comment": "Blue spotlight aimed from (-3.5,1.5,-1) toward scene centre (0,0.5,0). Rotation: quaternion [-0.2184,-0.7647,0, 0.6063] rotates local -Z to the target direction.",
       "name": "BlueSpotLight",
-      "position": [-3.5, 1.5, -1.0],
-      "rotation": [-0.2184, -0.7647, 0.0, 0.6063],
+      "position": [
+        -3.5,
+        1.5,
+        -1
+      ],
+      "rotation": [
+        -0.2184000015258789,
+        -0.7646999955177307,
+        0,
+        0.6062999963760376
+      ],
       "light": {
         "type": "spot",
-        "color":          [0.25, 0.45, 1.0],
-        "intensity":      40.0,
-        "range":          8.0,
-        "innerConeAngle": 15,
-        "outerConeAngle": 30
-      }
+        "color": [
+          0.25,
+          0.45,
+          1
+        ],
+        "intensity": 40,
+        "range": 8,
+        "innerConeAngle": 14.999999999999998,
+        "outerConeAngle": 29.999999999999996,
+        "castShadow": false,
+        "shadowBias": 0.005,
+        "pcfRadius": 1
+      },
+      "scale": [
+        1,
+        1,
+        1
+      ]
     },
-
     {
       "name": "CrimsonLight",
-      "position": [3.0, 1.2, -3.5],
+      "position": [
+        3,
+        1.2000000476837158,
+        -3.5
+      ],
       "light": {
-        "type":               "point",
-        "castShadow":         false,
-        "shadowBias":         0.002,
+        "type": "point",
+        "castShadow": false,
+        "shadowBias": 0.002,
         "shadowMapResolution": 512,
-        "color":              [1.0, 0.15, 0.2],
-        "intensity":          18.0,
-        "range":              3.5
-      }
+        "color": [
+          1,
+          0.15,
+          0.2
+        ],
+        "intensity": 18,
+        "range": 3.5,
+        "pcfRadius": 1
+      },
+      "rotation": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ]
     },
-
     {
       "_comment": "─── Meshes ───────────────────────────────────────────────────────────────",
       "name": "Cube",
-      "position": [0, 0.5, 0],
-      "rotation": [0, 0, 0, 1],
-      "scale":    [1, 1, 1],
-      "mesh":     { "type": "box", "width": 1, "height": 1, "depth": 1 },
+      "position": [
+        0,
+        0.800000011920929,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "mesh": {
+        "type": "box",
+        "width": 1,
+        "height": 1,
+        "depth": 1
+      },
       "material": "CubeMat"
     },
-
     {
       "name": "UVSphere",
-      "position": [-2, 0.5, 0],
-      "rotation": [0, 0, 0, 1],
-      "scale":    [1, 1, 1],
-      "mesh":     { "type": "uvsphere", "radius": 0.5 },
+      "position": [
+        -2,
+        0.5,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "mesh": {
+        "type": "uvsphere",
+        "radius": 0.5
+      },
       "material": "UVSphereMat"
     },
-
     {
       "name": "IcoSphere",
-      "position": [2, 0.5, 0],
-      "rotation": [0, 0, 0, 1],
-      "scale":    [1, 1, 1],
-      "mesh":     { "type": "icosphere", "radius": 0.5 },
+      "position": [
+        2,
+        0.5,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "mesh": {
+        "type": "icosphere",
+        "radius": 0.5
+      },
       "material": "IcoSphereMat"
     },
-
     {
       "name": "Floor",
-      "position": [0, 0, 0],
-      "rotation": [0, 0, 0, 1],
-      "scale":    [1, 1, 1],
-      "mesh":     { "type": "plane", "width": 12, "depth": 12 },
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "mesh": {
+        "type": "plane",
+        "width": 12,
+        "depth": 12
+      },
       "material": "FloorMat"
     },
-
     {
       "_comment": "Back wall: createPlane is XZ-horizontal; rotated +90° around X so it stands vertical. Quaternion [sin(π/4), 0, 0, cos(π/4)] = [0.7071, 0, 0, 0.7071]. Centred at y=2.5 to sit flush on the floor.",
       "name": "BackWall",
-      "position": [0, 2.5, -6],
-      "rotation": [0.7071, 0, 0, 0.7071],
-      "scale":    [1, 1, 1],
-      "mesh":     { "type": "plane", "width": 12, "depth": 5 },
+      "position": [
+        0,
+        2.5,
+        -6
+      ],
+      "rotation": [
+        0.707099974155426,
+        0,
+        0,
+        0.707099974155426
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "mesh": {
+        "type": "plane",
+        "width": 12,
+        "depth": 5
+      },
       "material": "WallMat"
     }
-  ]
+  ],
+  "envConfig": {
+    "ambient": [
+      0.03,
+      0.03,
+      0.03
+    ],
+    "ssao": {
+      "enabled": true,
+      "radius": 0.5,
+      "bias": 0.02,
+      "intensity": 1.5,
+      "sampleCount": 16,
+      "blurSharpness": 10
+    },
+    "ssr": {
+      "enabled": true,
+      "maxRaySteps": 128,
+      "thickness": 0.3,
+      "stride": 2,
+      "fadeEnd": 0.85,
+      "roughnessCutoff": 0.7,
+      "jitterScale": 1,
+      "maxDistance": 50,
+      "strideZCutoff": 0.01,
+      "envFallbackStr": 0.5
+    },
+    "background": {
+      "type": "cubemap",
+      "basePath": "/textures/cubemaps/saintpeter/",
+      "ext": ".jpg"
+    }
+  }
 }

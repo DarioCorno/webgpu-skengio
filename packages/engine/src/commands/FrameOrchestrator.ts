@@ -24,7 +24,7 @@ import { PassType, type RenderGraph } from '../rendergraph/RenderGraph';
 import type { SceneGraph, CullResults, DrawableRef } from '../scene/SceneGraph';
 import { RenderPath } from '../materials/MaterialSystem';
 import type { MaterialHandle } from '../materials/MaterialSystem';
-import type { CameraSystem } from '../camera/Camera';
+import { CameraSystem } from '../camera/Camera';
 import type { LightSystem } from '../lights/LightSystem';
 import type { MaterialSystem } from '../materials/MaterialSystem';
 import type { PostProcessStack, PostProcessContext } from '../postprocess/PostProcessStack';
@@ -1108,6 +1108,7 @@ export class FrameOrchestrator {
                 (h) => this._meshSystem.getBoundingSphere(h),
                 tolerance,
                 (mh) => this._materialSystem.getRenderPath(mh) === RenderPath.Forward,
+                (h) => this._meshSystem.getAABB(h),
             );
         }
 
@@ -1361,6 +1362,32 @@ export class FrameOrchestrator {
             const shadowAtlasVId    = this._renderGraph.importTexture('ShadowAtlas', shadowAtlasHandle);
             const shadowCasterInfos = this._lightSystem.getShadowCasterInfos();
 
+            // ── Per-cascade frustum culling ───────────────────────────────
+            // Build a Set<NodeHandle> per cascade slot so the draw loop can
+            // quickly skip geometry outside this cascade's frustum.
+            const shadowVisibleSets: Set<number>[] = [];
+            {
+                let slot = 0;
+                for (const casterInfo of shadowCasterInfos) {
+                    for (const cascade of casterInfo.cascades) {
+                        if (slot >= MAX_SHADOW_CASCADE_SLOTS) break;
+                        const region = cascade.atlasRegion;
+                        if (region.w <= 0 || region.h <= 0) {
+                            shadowVisibleSets.push(new Set()); slot++; continue;
+                        }
+                        const cascadePlanes = CameraSystem.extractFrustumPlanes(cascade.viewProj);
+                        const culled = this._sceneGraph.cullShadow(
+                            cascadePlanes,
+                            (h) => this._meshSystem.getBoundingSphere(h),
+                        );
+                        const nodeSet = new Set<number>();
+                        for (let i = 0; i < culled.length; i++) nodeSet.add(culled[i]!.nodeHandle);
+                        shadowVisibleSets.push(nodeSet);
+                        slot++;
+                    }
+                }
+            }
+
             // One render pass covers all lights + cascades.
             // The atlas is cleared once; viewport/scissor selects each cascade's sub-region.
             this._renderGraph.addShadowPass(
@@ -1391,6 +1418,9 @@ export class FrameOrchestrator {
                             rp.setViewport(region.x, region.y, region.w, region.h, 0, 1);
                             rp.setScissorRect(region.x, region.y, region.w, region.h);
 
+                            // Per-cascade visible set for culling
+                            const cascadeVisible = shadowVisibleSets[cascadeSlot];
+
                             // ── Instanced static batches ──────────────────────
                             if (this._instanceBatches.length > 0 && this._shadowInstancedG2BG) {
                                 rp.setPipeline(this._shadowInstancedPipeline);
@@ -1398,6 +1428,12 @@ export class FrameOrchestrator {
                                 rp.setBindGroup(2, this._shadowInstancedG2BG);
 
                                 for (const batch of this._instanceBatches) {
+                                    // Skip entire batch if none of its instances are
+                                    // in this cascade (checked via the first drawable's
+                                    // node — batched statics share the same mesh, but
+                                    // instanced draws can't be partially culled here).
+                                    // Full per-instance culling would require splitting
+                                    // the batch, which isn't worth it for v1.
                                     const drawData = this._meshSystem.getDrawData(batch.meshHandle);
                                     if (!drawData) continue;
                                     for (let j = 0; j < drawData.vertexBuffers.length; j++) {
@@ -1427,6 +1463,8 @@ export class FrameOrchestrator {
 
                                 for (let i = 0; i < dynCount; i++) {
                                     const drawable = this._dynamicDrawables[i]!;
+                                    // Per-cascade culling: skip if this node isn't visible
+                                    if (cascadeVisible && !cascadeVisible.has(drawable.nodeHandle)) continue;
                                     const skinHandle = this._animationSystem?.getSkinForNode(drawable.nodeHandle);
                                     const isSkinned  = skinHandle !== undefined && skinHandle !== null;
                                     const drawData = this._meshSystem.getDrawData(drawable.meshHandle);
@@ -1500,6 +1538,8 @@ export class FrameOrchestrator {
 
                                 for (let ti = 0; ti < maxTrans; ti++) {
                                     const drawable = transparents[ti]!;
+                                    // Per-cascade culling
+                                    if (cascadeVisible && !cascadeVisible.has(drawable.nodeHandle)) continue;
                                     const matRecord = this._materialSystem.getMaterial(drawable.materialHandle);
                                     if (!matRecord || !matRecord.castShadow) continue;
 

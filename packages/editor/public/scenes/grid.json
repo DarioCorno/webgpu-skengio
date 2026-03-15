@@ -6,7 +6,7 @@
     "frustumCulling": true,
     "showEditorPanel": false,
     "showStats": true,
-    "halfResolution": true
+    "halfResolution": false
   },
   "envConfig": {
     "background": {

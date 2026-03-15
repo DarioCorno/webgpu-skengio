@@ -16,7 +16,7 @@ import { provideHintPanel } from './composables/useHintPanel';
 const engine = shallowRef<Engine | null>(null);
 const selectedNode = ref<number | null>(-1);
 const viewportRef = ref<InstanceType<typeof Viewport> | null>(null);
-const sceneName = ref('animations/gltf-boy');
+const sceneName = ref('grid');
 // Key used to force remount of engine-dependent components after scene reload
 const sceneKey = ref(0);
 const textureFiles = ref<string[]>([]);

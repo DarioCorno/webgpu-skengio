@@ -4,6 +4,7 @@ import { mat4 } from 'gl-matrix';
 import type { MeshHandle, AABB, BoundingSphere } from '../geometry/MeshSystem';
 import type { MaterialHandle } from '../materials/MaterialSystem';
 import type { LightHandle } from '../lights/LightSystem';
+import { StaticBVH, computeWorldAABB, aabbInFrustum, type BVHLeafEntry } from './BVH';
 
 // -------------------------------------------------------------------------
 // Math types (minimal; replace with a proper math library)
@@ -114,10 +115,16 @@ export class SceneGraph {
      */
     private _dirtyRoots: Set<NodeHandle> = new Set();
 
+    // --- BVH acceleration structure for static mesh nodes ---
+    private _staticBVH = new StaticBVH();
+    private _bvhDirty  = true; // starts dirty so the first frame builds
+
     // Pooled cull result arrays — cleared and reused each frame instead of reallocated.
     private _cullOpaque:      DrawableRef[] = [];
     private _cullTransparent: DrawableRef[] = [];
     private _cullLights:      NodeHandle[]  = [];
+    /** Pooled array for BVH query results (avoids per-frame allocation). */
+    private _bvhQueryResults: BVHLeafEntry[] = [];
 
     // -------------------------------------------------------------------------
     // Lifecycle
@@ -162,6 +169,8 @@ export class SceneGraph {
         if (!parentDirty) {
             this._dirtyRoots.add(handle);
         }
+
+        this._bvhDirty = true;
 
         return handle;
     }
@@ -211,7 +220,10 @@ export class SceneGraph {
      */
     setNodeStatic(handle: NodeHandle, isStatic: boolean): void {
         const node = this._nodes.get(handle);
-        if (node) node.isStatic = isStatic;
+        if (node && node.isStatic !== isStatic) {
+            node.isStatic = isStatic;
+            this._bvhDirty = true;
+        }
     }
 
     /**
@@ -288,23 +300,18 @@ export class SceneGraph {
     // -------------------------------------------------------------------------
 
     /**
-     * Walk all nodes, frustum-cull with bounding spheres, and produce draw lists.
+     * Walk all nodes, frustum-cull, and produce draw lists.
      *
-     * @param _viewProjection     VP matrix (kept for API symmetry; frustum planes
-     *                            are passed pre-extracted to avoid recomputation).
+     * Static mesh nodes are culled via the BVH (AABB-vs-frustum, O(log N)).
+     * Dynamic mesh nodes and lights are scanned linearly with sphere-vs-frustum.
+     *
+     * @param _viewProjection     VP matrix (kept for API symmetry).
      * @param cameraPosition      World-space camera position (for distance sort).
      * @param frustumPlanes       Six normalised frustum planes [a,b,c,d] each.
-     *                            Pass an empty array to skip frustum culling.
-     * @param getBoundingSphere   Returns the object-space bounding sphere for a
-     *                            mesh handle, or undefined if not available.
-     *                            Meshes without a sphere bypass the sphere test.
-     *
-     * For multi-material meshes one DrawableRef is emitted per materialHandle
-     * entry. Meshes with no materialHandles get a sentinel handle 0.
-     *
-     * @param isTransparentMaterial  Optional callback that returns true for
-     *                               materials that require the forward (blend)
-     *                               path.  When null all drawables are opaque.
+     * @param getBoundingSphere   Object-space bounding sphere for a mesh.
+     * @param tolerance           Conservative inflation of bounding volumes.
+     * @param isTransparentMaterial  Returns true for forward/blend materials.
+     * @param getAABB             Object-space AABB for a mesh (enables BVH).
      */
     cull(
         _viewProjection:   Mat4,
@@ -313,63 +320,85 @@ export class SceneGraph {
         getBoundingSphere: ((h: MeshHandle) => BoundingSphere | undefined) | null = null,
         tolerance:         number                                                = 0,
         isTransparentMaterial: ((h: MaterialHandle) => boolean) | null           = null,
+        getAABB:           ((h: MeshHandle) => AABB | undefined) | null          = null,
     ): CullResults {
         const opaqueDrawables      = this._cullOpaque;      opaqueDrawables.length = 0;
         const transparentDrawables = this._cullTransparent;  transparentDrawables.length = 0;
         const visibleLights        = this._cullLights;       visibleLights.length = 0;
 
-        const doCull = frustumPlanes.length === 6 && getBoundingSphere !== null;
+        const doCull = frustumPlanes.length === 6;
 
+        // ---- Rebuild static BVH if needed --------------------------------
+        if (this._bvhDirty && getAABB) {
+            this._rebuildBVH(getAABB);
+        }
+        const useBVH = doCull && this._staticBVH.leafCount > 0;
+
+        // ---- BVH query for static mesh nodes -----------------------------
+        if (useBVH) {
+            const bvhResults = this._bvhQueryResults;
+            bvhResults.length = 0;
+            this._staticBVH.query(frustumPlanes, bvhResults);
+
+            for (let ri = 0; ri < bvhResults.length; ri++) {
+                const leaf = bvhResults[ri]!;
+                const distanceToCamera = _distSq(leaf.worldMatrix, cameraPosition);
+                const handles = leaf.materialHandles;
+                if (!handles || handles.length === 0) {
+                    opaqueDrawables.push({
+                        nodeHandle: leaf.nodeHandle, meshHandle: leaf.meshHandle,
+                        materialHandle: 0, worldMatrix: leaf.worldMatrix, distanceToCamera,
+                        isStatic: true,
+                    });
+                } else {
+                    for (const materialHandle of handles) {
+                        const ref: DrawableRef = {
+                            nodeHandle: leaf.nodeHandle, meshHandle: leaf.meshHandle,
+                            materialHandle, worldMatrix: leaf.worldMatrix, distanceToCamera,
+                            isStatic: true,
+                        };
+                        if (isTransparentMaterial && isTransparentMaterial(materialHandle)) {
+                            transparentDrawables.push(ref);
+                        } else {
+                            opaqueDrawables.push(ref);
+                        }
+                    }
+                }
+            }
+        }
+
+        // ---- Linear scan for dynamic mesh nodes, lights, and (if no BVH) statics ----
+        const doSphereTest = doCull && getBoundingSphere !== null;
         for (const node of this._nodes.values()) {
-            // ---- Light nodes -----------------------------------------------
             if (node.type === NodeType.Light) {
                 visibleLights.push(node.handle);
                 continue;
             }
 
-            // ---- Mesh nodes ------------------------------------------------
-            if (node.type !== NodeType.Mesh || node.meshHandle === undefined) {
-                continue;
-            }
+            if (node.type !== NodeType.Mesh || node.meshHandle === undefined) continue;
 
-            // ---- Frustum test (sphere in world space) ----------------------
-            if (doCull) {
+            // If BVH handled statics, skip them here
+            if (useBVH && node.isStatic) continue;
+
+            // Frustum test (sphere in world space)
+            if (doSphereTest) {
                 const sphere = getBoundingSphere!(node.meshHandle);
                 if (sphere) {
-                    // Transform sphere center from object space to world space.
-                    // Column-major: result = M * [cx, cy, cz, 1]
                     const m  = node.worldMatrix;
-                    const cx = sphere.center.x;
-                    const cy = sphere.center.y;
-                    const cz = sphere.center.z;
+                    const cx = sphere.center.x, cy = sphere.center.y, cz = sphere.center.z;
                     const wx = m[0]! * cx + m[4]! * cy + m[8]!  * cz + m[12]!;
                     const wy = m[1]! * cx + m[5]! * cy + m[9]!  * cz + m[13]!;
                     const wz = m[2]! * cx + m[6]! * cy + m[10]! * cz + m[14]!;
-
-                    // Conservative radius: multiply by the largest column scale.
-                    // Use squared scales and take sqrt only once (the max).
                     const sx2 = m[0]! * m[0]! + m[1]! * m[1]! + m[2]!  * m[2]!;
                     const sy2 = m[4]! * m[4]! + m[5]! * m[5]! + m[6]!  * m[6]!;
                     const sz2 = m[8]! * m[8]! + m[9]! * m[9]! + m[10]! * m[10]!;
-                    const maxScale = Math.sqrt(Math.max(sx2, sy2, sz2));
-                    const wr = sphere.radius * maxScale + tolerance;
-
+                    const wr = sphere.radius * Math.sqrt(Math.max(sx2, sy2, sz2)) + tolerance;
                     if (!_sphereInFrustum(wx, wy, wz, wr, frustumPlanes)) continue;
                 }
             }
 
-            // Distance from camera for transparent depth sorting.
-            // Translation lives at column 3 of the column-major world matrix.
-            const tx = node.worldMatrix[12]!;
-            const ty = node.worldMatrix[13]!;
-            const tz = node.worldMatrix[14]!;
-            const dx = tx - cameraPosition[0]!;
-            const dy = ty - cameraPosition[1]!;
-            const dz = tz - cameraPosition[2]!;
-            const distanceToCamera = dx * dx + dy * dy + dz * dz; // squared — avoids sqrt; sort order preserved
-
+            const distanceToCamera = _distSq(node.worldMatrix, cameraPosition);
             const handles = node.materialHandles;
-
             if (!handles || handles.length === 0) {
                 opaqueDrawables.push({
                     nodeHandle: node.handle, meshHandle: node.meshHandle,
@@ -396,6 +425,124 @@ export class SceneGraph {
         transparentDrawables.sort((a, b) => b.distanceToCamera - a.distanceToCamera);
 
         return { opaqueDrawables, transparentDrawables, visibleLights };
+    }
+
+    // -------------------------------------------------------------------------
+    // Shadow frustum culling
+    // -------------------------------------------------------------------------
+
+    /** Pooled array for shadow cull results. */
+    private _shadowCullResults: DrawableRef[] = [];
+    /** Pooled array for BVH shadow query. */
+    private _bvhShadowQuery: BVHLeafEntry[] = [];
+
+    /**
+     * Cull mesh drawables against a shadow cascade's frustum.
+     * Returns only mesh DrawableRefs (no lights, no transparency sort).
+     * Uses the static BVH + linear scan of dynamics, same as camera cull.
+     */
+    cullShadow(
+        frustumPlanes: Float32Array[],
+        getBoundingSphere: ((h: MeshHandle) => BoundingSphere | undefined) | null = null,
+    ): DrawableRef[] {
+        const results = this._shadowCullResults;
+        results.length = 0;
+
+        const doCull = frustumPlanes.length === 6;
+        const useBVH = doCull && this._staticBVH.leafCount > 0;
+
+        // BVH query for statics
+        if (useBVH) {
+            const bvhResults = this._bvhShadowQuery;
+            bvhResults.length = 0;
+            this._staticBVH.query(frustumPlanes, bvhResults);
+
+            for (let i = 0; i < bvhResults.length; i++) {
+                const leaf = bvhResults[i]!;
+                const handles = leaf.materialHandles;
+                if (!handles || handles.length === 0) {
+                    results.push({
+                        nodeHandle: leaf.nodeHandle, meshHandle: leaf.meshHandle,
+                        materialHandle: 0, worldMatrix: leaf.worldMatrix,
+                        distanceToCamera: 0, isStatic: true,
+                    });
+                } else {
+                    for (const mh of handles) {
+                        results.push({
+                            nodeHandle: leaf.nodeHandle, meshHandle: leaf.meshHandle,
+                            materialHandle: mh, worldMatrix: leaf.worldMatrix,
+                            distanceToCamera: 0, isStatic: true,
+                        });
+                    }
+                }
+            }
+        }
+
+        // Linear scan of dynamics (and statics if no BVH)
+        const doSphereTest = doCull && getBoundingSphere !== null;
+        for (const node of this._nodes.values()) {
+            if (node.type !== NodeType.Mesh || node.meshHandle === undefined) continue;
+            if (useBVH && node.isStatic) continue;
+
+            if (doSphereTest) {
+                const sphere = getBoundingSphere!(node.meshHandle);
+                if (sphere) {
+                    const m = node.worldMatrix;
+                    const cx = sphere.center.x, cy = sphere.center.y, cz = sphere.center.z;
+                    const wx = m[0]! * cx + m[4]! * cy + m[8]!  * cz + m[12]!;
+                    const wy = m[1]! * cx + m[5]! * cy + m[9]!  * cz + m[13]!;
+                    const wz = m[2]! * cx + m[6]! * cy + m[10]! * cz + m[14]!;
+                    const sx2 = m[0]! * m[0]! + m[1]! * m[1]! + m[2]!  * m[2]!;
+                    const sy2 = m[4]! * m[4]! + m[5]! * m[5]! + m[6]!  * m[6]!;
+                    const sz2 = m[8]! * m[8]! + m[9]! * m[9]! + m[10]! * m[10]!;
+                    const wr = sphere.radius * Math.sqrt(Math.max(sx2, sy2, sz2));
+                    if (!_sphereInFrustum(wx, wy, wz, wr, frustumPlanes)) continue;
+                }
+            }
+
+            const handles = node.materialHandles;
+            if (!handles || handles.length === 0) {
+                results.push({
+                    nodeHandle: node.handle, meshHandle: node.meshHandle,
+                    materialHandle: 0, worldMatrix: node.worldMatrix,
+                    distanceToCamera: 0, isStatic: node.isStatic,
+                });
+            } else {
+                for (const mh of handles) {
+                    results.push({
+                        nodeHandle: node.handle, meshHandle: node.meshHandle,
+                        materialHandle: mh, worldMatrix: node.worldMatrix,
+                        distanceToCamera: 0, isStatic: node.isStatic,
+                    });
+                }
+            }
+        }
+
+        return results;
+    }
+
+    // -------------------------------------------------------------------------
+    // BVH management
+    // -------------------------------------------------------------------------
+
+    private _rebuildBVH(getAABB: (h: MeshHandle) => AABB | undefined): void {
+        const entries: BVHLeafEntry[] = [];
+        for (const node of this._nodes.values()) {
+            if (node.type !== NodeType.Mesh || !node.isStatic || node.meshHandle === undefined) continue;
+            const localAABB = getAABB(node.meshHandle);
+            if (!localAABB) continue;
+            const worldAABB = computeWorldAABB(localAABB, node.worldMatrix);
+            entries.push({
+                nodeHandle:      node.handle,
+                meshHandle:      node.meshHandle,
+                materialHandles: node.materialHandles ?? [],
+                worldMatrix:     node.worldMatrix,
+                worldAABB,
+                isStatic:        true,
+            });
+        }
+        this._staticBVH.build(entries);
+        this._bvhDirty = false;
     }
 
     // -------------------------------------------------------------------------
@@ -501,6 +648,8 @@ export class SceneGraph {
         this._nodes.clear();
         this._rootNodes.length = 0;
         this._dirtyRoots.clear();
+        this._staticBVH = new StaticBVH();
+        this._bvhDirty = true;
     }
 }
 
@@ -517,6 +666,14 @@ export class SceneGraph {
  * Planes must be normalised (unit-length normals) so the dot product gives the
  * true signed distance in world-space units.
  */
+/** Squared distance from a world matrix's translation to a camera position. */
+function _distSq(worldMatrix: Mat4, cameraPosition: Vec3f): number {
+    const dx = worldMatrix[12]! - cameraPosition[0]!;
+    const dy = worldMatrix[13]! - cameraPosition[1]!;
+    const dz = worldMatrix[14]! - cameraPosition[2]!;
+    return dx * dx + dy * dy + dz * dz;
+}
+
 function _sphereInFrustum(
     cx: number, cy: number, cz: number,
     radius: number,
